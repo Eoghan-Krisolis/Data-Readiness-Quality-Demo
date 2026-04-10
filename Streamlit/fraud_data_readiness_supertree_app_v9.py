@@ -1,5 +1,6 @@
 import os
 import re
+import json
 from pathlib import Path
 
 import numpy as np
@@ -134,28 +135,50 @@ def fit_model(df: pd.DataFrame, max_depth: int):
     clf = pipeline.named_steps["model"]
     return pipeline, clf, transformed_X, y, feature_names
 
-
+def clear_trained_model():
+    keys_to_clear = [
+        "trained_pipeline",
+        "trained_model",
+        "feature_names",
+        "X_train_transformed",
+        "y_train",
+        "dataset_name",
+        "viz_html",
+        "model_trained",
+    ]
+    for key in keys_to_clear:
+        if key in st.session_state:
+            del st.session_state[key]
 
 def inject_supertree_class_colors(html_content: str) -> str:
     """
-    Post-process the SuperTree HTML so the class colours align with the app palette.
-    This keeps the same visualisation library while standardising class colours.
+    Replace SuperTree's internal colour palette with one derived from the app's
+    class colours. SuperTree uses the JS array `M=[...]` and slices it into
+    `ot` for classification colouring, so patching M is the reliable fix.
     """
-    replacement_pairs = [
-        ("#1f77b4", COLOUR_SEQUENCE[0]),
-        ("#ff7f0e", COLOUR_SEQUENCE[1]),
-        ("rgb(31, 119, 180)", COLOUR_SEQUENCE[0]),
-        ("rgb(255, 127, 14)", COLOUR_SEQUENCE[1]),
-        ("rgba(31, 119, 180, 1)", COLOUR_SEQUENCE[0]),
-        ("rgba(255, 127, 14, 1)", COLOUR_SEQUENCE[1]),
-    ]
-    for old, new in replacement_pairs:
-        html_content = html_content.replace(old, new)
+    # Build a 20-colour palette where the first two colours are your class colours
+    # and the rest alternate, so every palette slice still stays on-brand.
+    custom_palette = [COLOUR_SEQUENCE[i % len(COLOUR_SEQUENCE)] for i in range(20)]
+    palette_js = json.dumps(custom_palette)
+
+    # Replace the SuperTree palette definition.
+    # The generated HTML contains: const M=[...]
+    html_content, n = re.subn(
+        r'const M=\[(.*?)\]',
+        f'const M={palette_js}',
+        html_content,
+        count=1,
+        flags=re.S,
+    )
+
+    # Optional safety check during development
+    #print(f"Patched SuperTree palette definitions: {n}")
+
     return html_content
 
 
 def get_current_page() -> str:
-    return st.sidebar.radio("Page", ["Model Explorer", "Model Comparison", "Predictions"], index=0)
+    return st.sidebar.selectbox("Page", ["Model Explorer", "Make Predictions", "Model Comparison"], index=0)
 
 def generate_vis(clf, X_transformed, y, feature_names, class_names, sample=None):
     super_tree = SuperTree(clf, X_transformed, y, feature_names, class_names)
@@ -504,57 +527,136 @@ def show_feature_distributions(df: pd.DataFrame):
                         st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
-        numeric_summary = (
-            df[NUMERIC_COLUMNS]
-            .describe()
-            .T
-            .rename(columns={
-                "count": "Count",
-                "mean": "Mean",
-                "std": "Std Dev",
-                "min": "Min",
-                "25%": "Q1",
-                "50%": "Median",
-                "75%": "Q3",
-                "max": "Max",
-            })
-            .reset_index()
-            .rename(columns={"index": "Feature"})
+        st.markdown("### Dataset Summary")
+
+        summary_by_target = st.toggle(
+            "Break down descriptive statistics by target variable",
+            value=False,
+            help="When enabled, separate summary tables are shown for legitimate and fraudulent transactions.",
+            key="summary_by_target_toggle",
         )
 
-        st.markdown("### 📊 Numerical Features")
-        st.dataframe(
-            numeric_summary.style.format({
-                "Count": "{:.0f}",
-                "Mean": "{:.2f}",
-                "Std Dev": "{:.2f}",
-                "Min": "{:.2f}",
-                "Q1": "{:.2f}",
-                "Median": "{:.2f}",
-                "Q3": "{:.2f}",
-                "Max": "{:.2f}",
-            }),
-            use_container_width=True,
-        )
-        st.caption("Q1 = 25th percentile, Median = 50th percentile, Q3 = 75th percentile")
+        if not summary_by_target:
+            numeric_summary = (
+                df[NUMERIC_COLUMNS]
+                .describe()
+                .T
+                .rename(columns={
+                    "count": "Count",
+                    "mean": "Mean",
+                    "std": "Std Dev",
+                    "min": "Min",
+                    "25%": "Q1",
+                    "50%": "Median",
+                    "75%": "Q3",
+                    "max": "Max",
+                })
+                .reset_index()
+                .rename(columns={"index": "Feature"})
+            )
 
-        categorical_df = df[CATEGORICAL_COLUMNS].fillna("Missing").astype(str)
-        categorical_summary = (
-            categorical_df
-            .describe(include="all")
-            .T
-            .rename(columns={
-                "count": "Count",
-                "unique": "Unique Values",
-                "top": "Most Common",
-                "freq": "Frequency",
-            })
-            .reset_index()
-            .rename(columns={"index": "Feature"})
-        )
+            st.markdown("### 📊 Numerical Features")
+            st.dataframe(
+                numeric_summary.style.format({
+                    "Count": "{:.0f}",
+                    "Mean": "{:.2f}",
+                    "Std Dev": "{:.2f}",
+                    "Min": "{:.2f}",
+                    "Q1": "{:.2f}",
+                    "Median": "{:.2f}",
+                    "Q3": "{:.2f}",
+                    "Max": "{:.2f}",
+                }),
+                use_container_width=True,
+            )
+            st.caption("Q1 = 25th percentile, Median = 50th percentile, Q3 = 75th percentile")
 
-        st.markdown("### 🧩 Categorical Features")
-        st.dataframe(categorical_summary, use_container_width=True)
+            categorical_df = df[CATEGORICAL_COLUMNS].fillna("Missing").astype(str)
+            categorical_summary = (
+                categorical_df
+                .describe(include="all")
+                .T
+                .rename(columns={
+                    "count": "Count",
+                    "unique": "Unique Values",
+                    "top": "Most Common",
+                    "freq": "Frequency",
+                })
+                .reset_index()
+                .rename(columns={"index": "Feature"})
+            )
+
+            st.markdown("### 🧩 Categorical Features")
+            st.dataframe(categorical_summary, use_container_width=True)
+
+        else:
+            summary_df = get_display_dataframe(df)
+
+            col1, col2 = st.columns(2)
+
+            for idx, (col, class_name) in enumerate(zip([col1, col2], CLASS_NAMES)):
+                with col:
+                    class_df = summary_df[summary_df["target_name"] == class_name].copy()
+
+                    st.markdown(
+                        f"## <span style='color:{COLOUR_SEQUENCE[idx]}'>{class_name}</span>",
+                        unsafe_allow_html=True,
+                    )
+
+                    # --- Numerical ---
+                    numeric_summary = (
+                        class_df[NUMERIC_COLUMNS]
+                        .describe()
+                        .T
+                        .rename(columns={
+                            "count": "Count",
+                            "mean": "Mean",
+                            "std": "Std Dev",
+                            "min": "Min",
+                            "25%": "Q1",
+                            "50%": "Median",
+                            "75%": "Q3",
+                            "max": "Max",
+                        })
+                        .reset_index()
+                        .rename(columns={"index": "Feature"})
+                    )
+
+                    st.markdown("### 📊 Numerical Features")
+                    st.dataframe(
+                        numeric_summary.style.format({
+                            "Count": "{:.0f}",
+                            "Mean": "{:.2f}",
+                            "Std Dev": "{:.2f}",
+                            "Min": "{:.2f}",
+                            "Q1": "{:.2f}",
+                            "Median": "{:.2f}",
+                            "Q3": "{:.2f}",
+                            "Max": "{:.2f}",
+                        }),
+                        use_container_width=True,
+                    )
+
+                    # --- Categorical ---
+                    categorical_df = class_df[CATEGORICAL_COLUMNS].fillna("Missing").astype(str)
+                    categorical_summary = (
+                        categorical_df
+                        .describe(include="all")
+                        .T
+                        .rename(columns={
+                            "count": "Count",
+                            "unique": "Unique Values",
+                            "top": "Most Common",
+                            "freq": "Frequency",
+                        })
+                        .reset_index()
+                        .rename(columns={"index": "Feature"})
+                    )
+
+                    st.markdown("### 🧩 Categorical Features")
+                    st.dataframe(categorical_summary, use_container_width=True)
+
+            st.caption("Q1 = 25th percentile, Median = 50th percentile, Q3 = 75th percentile")
 
 
 def show_data_visualisation(df: pd.DataFrame):
@@ -722,6 +824,11 @@ def main():
             st.session_state["dataset_name"] = dataset_name
             st.session_state["viz_html"] = generate_vis(clf, X_train_transformed, y_train, feature_names, CLASS_NAMES)
             st.session_state["model_trained"] = True
+
+        if st.session_state["model_trained"]:
+            if st.sidebar.button("Reset to Data Exploration"):
+                clear_trained_model()
+                st.rerun()
 
         if not st.session_state.get("model_trained", False) or st.session_state.get("dataset_name") != dataset_name:
             show_data_visualisation(selected_df)
