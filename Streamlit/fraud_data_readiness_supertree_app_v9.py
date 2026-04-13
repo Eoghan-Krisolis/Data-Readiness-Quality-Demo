@@ -643,7 +643,7 @@ def show_feature_distributions(df: pd.DataFrame):
                     )
 
                     # --- Categorical ---
-                    categorical_df = class_df[CATEGORICAL_COLUMNS].fillna("Missing").astype(str)
+                    categorical_df = class_df[CATEGORICAL_COLUMNS]#.fillna("Missing").astype(str)
                     categorical_summary = (
                         categorical_df
                         .describe(include="all")
@@ -840,7 +840,7 @@ def main():
 
         if not st.session_state.get("model_trained", False) or st.session_state.get("dataset_name") != dataset_name:
             show_data_visualisation(selected_df)
-            st.sidebar.info("Train a model to see a visualisation and evaluation metrics.")
+            st.sidebar.info("Train your chosen model to see a visualisation of the decision tree.")
             return
 
         st.subheader(f"Trained {max_depth}-Level Decision Tree")
@@ -919,6 +919,7 @@ def main():
         chart_df = comparison_df.melt(
             id_vars=["Dataset"],
             value_vars=[
+                "Train Accuracy",
                 "Test Accuracy",
                 "Test Precision (Fraud)",
                 "Test Recall (Fraud)",
@@ -939,7 +940,7 @@ def main():
             },
             barmode="group",
             text="Score",
-            title="Balanced Test Set Metrics by Dataset",
+            title="Model Metrics by Dataset",
         )
         fig.update_traces(texttemplate="%{text:.3f}", textposition="outside", cliponaxis=False)
         fig.update_layout(
@@ -947,7 +948,18 @@ def main():
             xaxis_title="",
             yaxis_title="Score",
             margin=dict(l=20, r=20, t=50, b=20),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
         )
+
+        
+
+        
         st.plotly_chart(fig, use_container_width=True)
 
     elif current_page ==  "Model Evaluation":
@@ -956,7 +968,7 @@ def main():
             not st.session_state.get("model_trained", False)
             or st.session_state.get("dataset_name") != dataset_name
         ):
-            st.info("Train a model on the Model Explorer page first, then come back here to examine the its metrics when evaluated on a balanced test set.")
+            st.info("Train your chosen model on the Model Explorer page first, then come back here to examine the its metrics when evaluated on a balanced test set.")
             return
         else:
             test_predictions = st.session_state["trained_pipeline"].predict(test_df[FEATURE_COLUMNS])
@@ -979,7 +991,7 @@ def main():
             not st.session_state.get("model_trained", False)
             or st.session_state.get("dataset_name") != dataset_name
         ):
-            st.info("Train a model on the Model Explorer page first, then come back here to make a prediction.")
+            st.info("Train your choen model on the Model Explorer page first, then come back here to make a prediction.")
             return
 
         current_defaults = selected_df[FEATURE_COLUMNS].copy()
