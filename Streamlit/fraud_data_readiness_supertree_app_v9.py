@@ -178,7 +178,7 @@ def inject_supertree_class_colors(html_content: str) -> str:
 
 
 def get_current_page() -> str:
-    return st.sidebar.selectbox("Page", ["Model Explorer", "Make Predictions", "Model Comparison"], index=0)
+    return st.sidebar.selectbox("Page", ["Model Explorer", "Make Predictions", "Model Evaluation", "Model Comparison"], index=0)
 
 def generate_vis(clf, X_transformed, y, feature_names, class_names, sample=None):
     super_tree = SuperTree(clf, X_transformed, y, feature_names, class_names)
@@ -721,12 +721,12 @@ def compare_all_datasets(max_depth: int, test_df: pd.DataFrame) -> pd.DataFrame:
         rows.append({
             "Dataset": dataset_name,
             "Train Accuracy": train_metrics["Accuracy"],
-            "Balanced Test Accuracy": test_metrics["Accuracy"],
-            "Balanced Test Precision (Fraud)": test_metrics["Precision (Fraud)"],
-            "Balanced Test Recall (Fraud)": test_metrics["Recall (Fraud)"],
-            "Balanced Test F1-score (Fraud)": test_metrics["F1-score (Fraud)"],
-            "Tree Depth": clf.get_depth(),
-            "Leaves": clf.get_n_leaves(),
+            "Test Accuracy": test_metrics["Accuracy"],
+            "Test Precision (Fraud)": test_metrics["Precision (Fraud)"],
+            "Test Recall (Fraud)": test_metrics["Recall (Fraud)"],
+            "Test F1-score (Fraud)": test_metrics["F1-score (Fraud)"],
+            # "Tree Depth": clf.get_depth(),
+            # "Leaves": clf.get_n_leaves(),
         })
     return pd.DataFrame(rows)
 
@@ -803,6 +803,7 @@ def main():
     )
 
     # st.sidebar.subheader("Set maximum tree depth")
+    max_depth = 3
     # max_depth = st.sidebar.slider("Max Depth", min_value=1, max_value=4, value=3, step=1)
 
     try:
@@ -843,42 +844,85 @@ def main():
             return
 
         st.subheader(f"Trained {max_depth}-Level Decision Tree")
-        st.components.v1.html(st.session_state["viz_html"], height=760)
+        st.components.v1.html(st.session_state["viz_html"], height=500)
 
-        st.subheader("Evaluate on Shared Balanced Test Dataset")
-        test_predictions = st.session_state["trained_pipeline"].predict(test_df[FEATURE_COLUMNS])
-        test_metrics = compute_metrics(test_df[TARGET_COLUMN].astype(int), test_predictions)
-
-        left_col, right_col = st.columns(2)
-        with left_col:
-            display_metrics(test_metrics, "Metrics")
-            plot_metrics_bar(test_metrics, "Test Set Metric Comparison")
-        with right_col:
-            st.markdown("**Confusion Matrix**")
-            plot_confusion(test_df[TARGET_COLUMN].astype(int), test_predictions, "")
+        
 
     elif current_page == "Model Comparison":
-        st.header("Comparison Across the Three Datasets")
+        st.header("Evaluation on Balance Test Set")
         st.markdown("Compare how the same decision tree setup behaves when trained on dirty, imbalanced, and cleaner datasets.")
         comparison_df = compare_all_datasets(max_depth, test_df)
-        st.dataframe(
-            comparison_df.style.format({
-                "Train Accuracy": "{:.3f}",
-                "Balanced Test Accuracy": "{:.3f}",
-                "Balanced Test Precision (Fraud)": "{:.3f}",
-                "Balanced Test Recall (Fraud)": "{:.3f}",
-                "Balanced Test F1-score (Fraud)": "{:.3f}",
-            }),
-            use_container_width=True,
+        metric_columns = [
+            "Train Accuracy",
+            "Test Accuracy",
+            "Test Precision (Fraud)",
+            "Test Recall (Fraud)",
+            "Test F1-score (Fraud)",
+        ]
+
+        format_dict = {col: "{:.3f}" for col in metric_columns}
+
+        styled_comparison_df = (
+            comparison_df.style
+            .format(format_dict)
+            .set_properties(
+                subset=["Dataset"],
+                **{
+                    "font-weight": "bold",
+                    "text-align": "left",
+                    "font-size": "15px",
+                    "white-space": "nowrap",
+                }
+            )
+            .set_properties(
+                subset=metric_columns,
+                **{
+                    "text-align": "center",
+                }
+            )
+            .background_gradient(
+                cmap="Blues",   # matches your confusion matrix / metric bar styling
+                subset=metric_columns,
+                vmin=0,
+                vmax=1,
+            )
+            # .highlight_max(
+            #     subset=metric_columns,
+            #     color="#dbe9f6",
+            # )
+            .set_table_styles([
+                {
+                    "selector": "th",
+                    "props": [
+                        ("font-weight", "bold"),
+                        ("text-align", "center"),
+                    ],
+                },
+                {
+                    "selector": "td",
+                    "props": [
+                        ("padding", "6px 10px"),
+                    ],
+                },
+            ])
         )
+
+        st.dataframe(
+            styled_comparison_df,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        
+      
 
         chart_df = comparison_df.melt(
             id_vars=["Dataset"],
             value_vars=[
-                "Balanced Test Accuracy",
-                "Balanced Test Precision (Fraud)",
-                "Balanced Test Recall (Fraud)",
-                "Balanced Test F1-score (Fraud)",
+                "Test Accuracy",
+                "Test Precision (Fraud)",
+                "Test Recall (Fraud)",
+                "Test F1-score (Fraud)",
             ],
             var_name="Metric",
             value_name="Score",
@@ -888,6 +932,11 @@ def main():
             x="Metric",
             y="Score",
             color="Dataset",
+            color_discrete_map={
+                "Dataset A - Poor Quality": "#F60B75",  
+                "Dataset B - Imbalanced": "#FFA500",          
+                "Dataset C - Good Quality": "#00D3CF",  
+            },
             barmode="group",
             text="Score",
             title="Balanced Test Set Metrics by Dataset",
@@ -900,6 +949,28 @@ def main():
             margin=dict(l=20, r=20, t=50, b=20),
         )
         st.plotly_chart(fig, use_container_width=True)
+
+    elif current_page ==  "Model Evaluation":
+        st.header("Model Evaluation")
+        if (
+            not st.session_state.get("model_trained", False)
+            or st.session_state.get("dataset_name") != dataset_name
+        ):
+            st.info("Train a model on the Model Explorer page first, then come back here to examine the its metrics when evaluated on a balanced test set.")
+            return
+        else:
+            test_predictions = st.session_state["trained_pipeline"].predict(test_df[FEATURE_COLUMNS])
+            test_metrics = compute_metrics(test_df[TARGET_COLUMN].astype(int), test_predictions)
+            display_metrics(test_metrics, "Metrics")
+
+            left_col, right_col = st.columns(2)
+            with left_col:
+                
+                plot_metrics_bar(test_metrics, "Test Set Metric Comparison")
+            with right_col:
+                st.markdown("**Confusion Matrix**")
+                plot_confusion(test_df[TARGET_COLUMN].astype(int), test_predictions, "")
+
 
     else:
         st.header("Prediction Explorer")
@@ -952,13 +1023,13 @@ def main():
                 CLASS_NAMES,
             )
 
-            col1, col2 = st.columns([2, 2])
-            with col1:
-                st.write("**📊 Fraud Probabilities:**")
-                st.plotly_chart(fig, use_container_width=True)
-            with col2:
-                st.write("**🛤️ Decision Path:**")
-                st.graphviz_chart(highlighted_dot)
+            
+            
+            st.write("**📊 Fraud Probabilities:**")
+            st.plotly_chart(fig, use_container_width=True)
+        
+            st.write("**🛤️ Decision Path:**")
+            st.graphviz_chart(highlighted_dot)
 
 
 if __name__ == "__main__":
