@@ -771,8 +771,15 @@ def make_prediction_input(defaults: pd.Series) -> pd.DataFrame:
 
 
 def main():
-    horizontal_logo = "../Logo.png"
-    icon = "../Icon.png"
+   
+
+    BASE_DIR = Path(__file__).resolve().parent
+    ROOT_DIR = BASE_DIR.parent
+
+    horizontal_logo = ROOT_DIR / "Logo.png"
+    icon = ROOT_DIR / "Icon.png"
+    # horizontal_logo = "../Logo.png"
+    # icon = "../Icon.png"
 
     st.set_page_config(
         page_title="Krisolis Data Readiness and Quality Demonstration",
