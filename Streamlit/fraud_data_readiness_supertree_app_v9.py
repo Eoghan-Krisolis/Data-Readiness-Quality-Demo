@@ -47,15 +47,15 @@ CATEGORICAL_COLUMNS = [
     "card_present",
 ]
 DATASET_FILES = {
-    "Dataset A - Poor Data Quality": "fraud_dataset_A_poor_quality.csv",
-    "Dataset B - Severely Imbalanced": "fraud_dataset_B_imbalanced.csv",
-    "Dataset C - Good Quality Data": "fraud_dataset_C_good_quality.csv",
+    "Dataset A - Poor Quality": "fraud_dataset_A_poor_quality.csv",
+    "Dataset B - Imbalanced": "fraud_dataset_B_imbalanced.csv",
+    "Dataset C - Good Quality": "fraud_dataset_C_good_quality.csv",
 }
 TEST_FILE = "fraud_test_balanced.csv"
 DATASET_DESCRIPTIONS = {
-    "Dataset A - Poor Data Quality": "This dataset contains duplicates, missing values, inconsistent category labels and corrupted values. The tree is trained on the raw dataset with only minimal technical preprocessing so those issues still affect the model.",
-    "Dataset B - Severely Imbalanced": "This dataset is comparatively clean, but fraudulent transactions are very rare. It demonstrates how a decision tree can appear to perform well while failing to identify the minority class.",
-    "Dataset C - Good Quality Data": "This dataset is clean, more balanced and has a stronger fraud signal. It is intended to show what a more useful and interpretable tree looks like when the data is ready for modelling.",
+    "Dataset A - Poor Quality": "This dataset contains duplicates, missing values, inconsistent category labels and corrupted values. The tree is trained on the raw dataset with only minimal technical preprocessing so those issues still affect the model.",
+    "Dataset B - Imbalanced": "This dataset is comparatively clean, but fraudulent transactions are very rare. It demonstrates how a decision tree can appear to perform well while failing to identify the minority class.",
+    "Dataset C - Good Quality": "This dataset is clean, more balanced and has a stronger fraud signal. It is intended to show what a more useful and interpretable tree looks like when the data is ready for modelling.",
 }
 
 
@@ -412,7 +412,7 @@ def show_feature_distributions(df: pd.DataFrame):
 
         feature_type = st.radio(
             "Feature type",
-            ("Numeric Features", "Categorical Features"),
+            ("Numeric Features", "Categorical Features", "Target Feature"),
             horizontal=True,
         )
         typ, brk = st.columns(2)
@@ -423,7 +423,7 @@ def show_feature_distributions(df: pd.DataFrame):
                     NUMERIC_COLUMNS,
                     default=NUMERIC_COLUMNS[:2],
                 )
-            else:
+            elif feature_type=="Categorical Features":
                 selected_features = st.multiselect(
                     "Choose categorical features to display",
                     CATEGORICAL_COLUMNS,
@@ -432,12 +432,15 @@ def show_feature_distributions(df: pd.DataFrame):
 
             
         with brk:
-            st.markdown("By Target?")
-            breakdown_by_target = st.toggle(
-                "Break down plots by target variable",
-                value=True,
-                help="When enabled, each feature is shown separately for legitimate and fraudulent transactions.",
-            )
+            if feature_type=="Target Feature":
+                st.markdown(" ")
+            else:
+                st.markdown("By Target?")
+                breakdown_by_target = st.toggle(
+                    "Break down plots by target variable",
+                    value=True,
+                    help="When enabled, each feature is shown separately for legitimate and fraudulent transactions.",
+                )
 
 
         if feature_type == "Numeric Features":
@@ -483,7 +486,7 @@ def show_feature_distributions(df: pd.DataFrame):
                         )
                         st.plotly_chart(fig, use_container_width=True)
 
-        else:
+        elif feature_type=="Categorical Features":
             if not selected_features:
                 st.info("Select at least one categorical feature to display.")
             else:
@@ -525,6 +528,8 @@ def show_feature_distributions(df: pd.DataFrame):
                         )
                         fig.update_xaxes(categoryorder="total descending")
                         st.plotly_chart(fig, use_container_width=True)
+        else:
+            plot_class_balance(df)
 
     with tab2:
         st.markdown("### Dataset Summary")
@@ -555,7 +560,7 @@ def show_feature_distributions(df: pd.DataFrame):
                 .rename(columns={"index": "Feature"})
             )
 
-            st.markdown("### 📊 Numerical Features")
+            st.markdown("### 📈 Numerical Features")
             st.dataframe(
                 numeric_summary.style.format({
                     "Count": "{:.0f}",
@@ -571,7 +576,7 @@ def show_feature_distributions(df: pd.DataFrame):
             )
             st.caption("Q1 = 25th percentile, Median = 50th percentile, Q3 = 75th percentile")
 
-            categorical_df = df[CATEGORICAL_COLUMNS].fillna("Missing").astype(str)
+            categorical_df = df[CATEGORICAL_COLUMNS]#.fillna("Missing").astype(str)
             categorical_summary = (
                 categorical_df
                 .describe(include="all")
@@ -586,7 +591,7 @@ def show_feature_distributions(df: pd.DataFrame):
                 .rename(columns={"index": "Feature"})
             )
 
-            st.markdown("### 🧩 Categorical Features")
+            st.markdown("### 📊 Categorical Features")
             st.dataframe(categorical_summary, use_container_width=True)
 
         else:
@@ -622,7 +627,7 @@ def show_feature_distributions(df: pd.DataFrame):
                         .rename(columns={"index": "Feature"})
                     )
 
-                    st.markdown("### 📊 Numerical Features")
+                    st.markdown("### 📈 Numerical Features")
                     st.dataframe(
                         numeric_summary.style.format({
                             "Count": "{:.0f}",
@@ -653,7 +658,7 @@ def show_feature_distributions(df: pd.DataFrame):
                         .rename(columns={"index": "Feature"})
                     )
 
-                    st.markdown("### 🧩 Categorical Features")
+                    st.markdown("### 📊 Categorical Features")
                     st.dataframe(categorical_summary, use_container_width=True)
 
             st.caption("Q1 = 25th percentile, Median = 50th percentile, Q3 = 75th percentile")
@@ -676,8 +681,8 @@ def dataset_health_summary(df: pd.DataFrame):
     col2.metric("Fraud Rate", f"{fraud_rate:.1%}")
     col3.metric("Missing Values", f"{missing_values:,}")
     col4.metric("Duplicate Rows", f"{duplicate_rows:,}")
-    if invalid_amounts > 0:
-        st.caption(f"This dataset contains {invalid_amounts} transaction amounts below zero.")
+    # if invalid_amounts > 0:
+    #     st.caption(f"This dataset contains {invalid_amounts} transaction amounts below zero.")
 
 
 def display_metrics(metrics: dict, title: str):
@@ -774,9 +779,9 @@ def main():
         layout="wide",
         initial_sidebar_state="expanded",
         menu_items={
-            "About": """# Krisolis SData Readiness and Quality Demonstration.
+            "About": """# Krisolis Data Readiness and Quality Demonstration.
             Created by Eoghan Staunton @Krisolis
-            Using scikit-learn and supertree""",
+            Using scikit-learn, supertree, pandas and plotly""",
         },
     )
     if os.path.exists(horizontal_logo) and os.path.exists(icon):
@@ -787,17 +792,18 @@ def main():
         "This app demonstrates a **Decision Tree Classifier** on three transaction fraud datasets. Each dataset represents a different level of data readiness so learners can compare the model structure and the performance produced by the same algorithm when training on different datasets.",
     )
 
+    st.sidebar.subheader("Choose Page")
     current_page = get_current_page()
 
     st.sidebar.subheader("Choose Dataset")
     dataset_name = st.sidebar.radio(
         "Training Dataset",
         options=list(DATASET_FILES.keys()),
-        help="Dataset A is intentionally dirty, Dataset B is severely imbalanced, and Dataset C is cleaner and more balanced. All models can be evaluated on the same balanced test dataset.",
+        help="Choose a dataset to explore before training a model",
     )
 
-    st.sidebar.subheader("Set maximum tree depth")
-    max_depth = st.sidebar.slider("Max Depth", min_value=1, max_value=4, value=3, step=1)
+    # st.sidebar.subheader("Set maximum tree depth")
+    # max_depth = st.sidebar.slider("Max Depth", min_value=1, max_value=4, value=3, step=1)
 
     try:
         selected_df = load_dataset(dataset_name)
@@ -812,9 +818,10 @@ def main():
             help="Explore the selected dataset before training the model.",
         )
         dataset_health_summary(selected_df)
-        st.info(DATASET_DESCRIPTIONS[dataset_name])
+        #st.info(DATASET_DESCRIPTIONS[dataset_name])
 
-        if st.sidebar.button("Train and Visualise Model"):
+        st.sidebar.subheader("Train Model")
+        if st.sidebar.button("Train and Visualise Model", help="Train a decision tree using the selected dataset to see how data readiness/quality affects model performance"):
             pipeline, clf, X_train_transformed, y_train, feature_names = fit_model(selected_df, max_depth)
             st.session_state["trained_pipeline"] = pipeline
             st.session_state["trained_model"] = clf
@@ -832,7 +839,7 @@ def main():
 
         if not st.session_state.get("model_trained", False) or st.session_state.get("dataset_name") != dataset_name:
             show_data_visualisation(selected_df)
-            st.sidebar.info("Train a model to see the SuperTree visualisation and evaluation metrics. Use the other pages for model comparison and predictions.")
+            st.sidebar.info("Train a model to see a visualisation and evaluation metrics.")
             return
 
         st.subheader(f"Trained {max_depth}-Level Decision Tree")
