@@ -574,6 +574,7 @@ def show_feature_distributions(df: pd.DataFrame):
                     "Max": "{:.2f}",
                 }),
                 use_container_width=True,
+                hide_index=True
             )
             st.caption("Q1 = 25th percentile, Median = 50th percentile, Q3 = 75th percentile")
 
@@ -593,7 +594,8 @@ def show_feature_distributions(df: pd.DataFrame):
             )
 
             st.markdown("### 📊 Categorical Features")
-            st.dataframe(categorical_summary, use_container_width=True)
+            st.dataframe(categorical_summary, use_container_width=True,
+                hide_index=True)
 
         else:
             summary_df = get_display_dataframe(df)
@@ -641,6 +643,7 @@ def show_feature_distributions(df: pd.DataFrame):
                             "Max": "{:.2f}",
                         }),
                         use_container_width=True,
+                        hide_index=True,
                     )
 
                     # --- Categorical ---
@@ -660,7 +663,7 @@ def show_feature_distributions(df: pd.DataFrame):
                     )
 
                     st.markdown("### 📊 Categorical Features")
-                    st.dataframe(categorical_summary, use_container_width=True)
+                    st.dataframe(categorical_summary, use_container_width=True,hide_index=True)
 
             st.caption("Q1 = 25th percentile, Median = 50th percentile, Q3 = 75th percentile")
 
