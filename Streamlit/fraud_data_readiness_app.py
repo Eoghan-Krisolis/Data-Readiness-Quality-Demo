@@ -835,6 +835,8 @@ def main():
             st.session_state["model_trained"] = True
             st.session_state["test_preds"]  = pipeline.predict(test_df[FEATURE_COLUMNS])
             st.session_state["model_test_acc"] = accuracy_score(test_df[TARGET_COLUMN],st.session_state["test_preds"])
+            #st.balloons()
+            st.toast(f"**Model Trained With** {st.session_state["dataset_name"]}.\n **Test Accuracy:** {st.session_state["model_test_acc"]:.3f}", icon="🤖")
 
         if st.session_state["model_trained"]:
             if st.sidebar.button("Reset to Data Exploration"):
