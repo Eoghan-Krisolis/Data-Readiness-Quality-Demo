@@ -370,35 +370,35 @@ def plot_class_balance(df: pd.DataFrame):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def show_scatter_matrix(df: pd.DataFrame):
-    plot_df = get_display_dataframe(df)
-    fig = px.scatter_matrix(
-        plot_df,
-        dimensions=NUMERIC_COLUMNS,
-        color="target_name",
-        hover_data=FEATURE_COLUMNS,
-        height=700,
-        color_discrete_sequence=COLOUR_SEQUENCE[:2],
-    )
-    fig.update_layout(margin=dict(l=50, r=50, t=50, b=50), autosize=True)
-    for axis in fig.layout:
-        if axis.startswith("xaxis"):
-            fig.layout[axis].tickangle = -45
-    st.plotly_chart(fig, use_container_width=True)
+# def show_scatter_matrix(df: pd.DataFrame):
+#     plot_df = get_display_dataframe(df)
+#     fig = px.scatter_matrix(
+#         plot_df,
+#         dimensions=NUMERIC_COLUMNS,
+#         color="target_name",
+#         hover_data=FEATURE_COLUMNS,
+#         height=700,
+#         color_discrete_sequence=COLOUR_SEQUENCE[:2],
+#     )
+#     fig.update_layout(margin=dict(l=50, r=50, t=50, b=50), autosize=True)
+#     for axis in fig.layout:
+#         if axis.startswith("xaxis"):
+#             fig.layout[axis].tickangle = -45
+#     st.plotly_chart(fig, use_container_width=True)
 
 
-def show_correlation_heatmap(df: pd.DataFrame):
-    corr_df = df[NUMERIC_COLUMNS + [TARGET_COLUMN]].copy()
-    corr = corr_df.corr(numeric_only=True)
-    fig = px.imshow(
-        corr,
-        text_auto=True,
-        aspect="auto",
-        color_continuous_scale="RdBu",
-        zmin=-1,
-        zmax=1,
-    )
-    st.plotly_chart(fig, use_container_width=True)
+# def show_correlation_heatmap(df: pd.DataFrame):
+#     corr_df = df[NUMERIC_COLUMNS + [TARGET_COLUMN]].copy()
+#     corr = corr_df.corr(numeric_only=True)
+#     fig = px.imshow(
+#         corr,
+#         text_auto=True,
+#         aspect="auto",
+#         color_continuous_scale="RdBu",
+#         zmin=-1,
+#         zmax=1,
+#     )
+#     st.plotly_chart(fig, use_container_width=True)
 
 
 
