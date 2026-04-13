@@ -812,19 +812,24 @@ def main():
     st.sidebar.subheader("Choose Page")
     current_page = get_current_page()
 
-    st.sidebar.subheader("Choose Dataset")
-    dataset_name = st.sidebar.radio(
-        "Training Dataset",
-        options=list(DATASET_FILES.keys()),
-        help="Choose a dataset to explore before training a model",
-    )
+    if current_page != "Model Comparison":
+
+        st.sidebar.subheader("Choose Dataset")
+        dataset_name = st.sidebar.radio(
+            "Training Dataset",
+            options=list(DATASET_FILES.keys()),
+            help="Choose a dataset to explore before training a model",
+        )
+        st.session_state["dataset_name"] = dataset_name
 
     # st.sidebar.subheader("Set maximum tree depth")
     max_depth = 3
     # max_depth = st.sidebar.slider("Max Depth", min_value=1, max_value=4, value=3, step=1)
 
     try:
-        selected_df = load_dataset(dataset_name)
+        if not st.session_state.get("dataset_name"):
+            st.session_state["dataset_name"] = list(DATASET_FILES.keys())[0]
+        selected_df = load_dataset(st.session_state["dataset_name"])
         test_df = load_test_dataset()
     except (FileNotFoundError, ValueError) as exc:
         st.error(str(exc))
@@ -837,6 +842,8 @@ def main():
         )
         dataset_health_summary(selected_df)
         #st.info(DATASET_DESCRIPTIONS[dataset_name])
+
+        
 
         st.sidebar.subheader("Train Model")
         if st.sidebar.button("Train and Visualise Model", help="Train a decision tree using the selected dataset to see how data readiness/quality affects model performance"):
@@ -873,7 +880,7 @@ def main():
         
 
     elif current_page == "Model Comparison":
-        st.header("Evaluation on Balance Test Set")
+        st.header("Evaluation on Balanced Test Set")
         st.markdown("Compare how the same decision tree setup behaves when trained on dirty, imbalanced, and cleaner datasets.")
         comparison_df = compare_all_datasets(max_depth, test_df)
         metric_columns = [
