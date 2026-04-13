@@ -630,7 +630,10 @@ def show_feature_distributions(df: pd.DataFrame):
                         .rename(columns={"index": "Feature"})
                     )
 
-                    st.markdown("### 📈 Numerical Features")
+                    if col==col1:
+                        st.markdown("### 📈 Numerical Features")
+                    else:
+                        st.markdown("###  ")
                     st.dataframe(
                         numeric_summary.style.format({
                             "Count": "{:.0f}",
@@ -662,7 +665,10 @@ def show_feature_distributions(df: pd.DataFrame):
                         .rename(columns={"index": "Feature"})
                     )
 
-                    st.markdown("### 📊 Categorical Features")
+                    if col==col1:
+                        st.markdown("### 📊 Categorical Features")
+                    else:
+                        st.markdown("###  ")
                     st.dataframe(categorical_summary, use_container_width=True,hide_index=True)
 
             st.caption("Q1 = 25th percentile, Median = 50th percentile, Q3 = 75th percentile")
