@@ -132,6 +132,7 @@ def fit_model(df: pd.DataFrame, max_depth: int):
 
     transformed_X = pipeline.named_steps["preprocessor"].transform(X)
     feature_names = list(pipeline.named_steps["preprocessor"].get_feature_names_out())
+    feature_names = [f.split("__")[-1] for f in feature_names]
     clf = pipeline.named_steps["model"]
     return pipeline, clf, transformed_X, y, feature_names
 
@@ -832,6 +833,8 @@ def main():
             st.session_state["dataset_name"] = dataset_name
             st.session_state["viz_html"] = generate_vis(clf, X_train_transformed, y_train, feature_names, CLASS_NAMES)
             st.session_state["model_trained"] = True
+            st.session_state["test_preds"]  = pipeline.predict(test_df[FEATURE_COLUMNS])
+            st.session_state["model_test_acc"] = accuracy_score(test_df[TARGET_COLUMN],st.session_state["test_preds"])
 
         if st.session_state["model_trained"]:
             if st.sidebar.button("Reset to Data Exploration"):
@@ -842,9 +845,12 @@ def main():
             show_data_visualisation(selected_df)
             st.sidebar.info("Train your chosen model to see a visualisation of the decision tree.")
             return
+        
 
-        st.subheader(f"Trained {max_depth}-Level Decision Tree")
-        st.components.v1.html(st.session_state["viz_html"], height=500)
+        st.subheader(f"Trained Decision Tree on {dataset_name}")#st.subheader(f"Trained {max_depth}-Level Decision Tree")
+        st.markdown(f"**Test Accuracy = {st.session_state["model_test_acc"]:.3f}**")
+        st.components.v1.html(st.session_state["viz_html"], height=600)
+
 
         
 
