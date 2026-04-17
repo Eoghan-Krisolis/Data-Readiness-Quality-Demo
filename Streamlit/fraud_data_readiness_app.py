@@ -401,9 +401,6 @@ def plot_class_balance(df: pd.DataFrame):
 #     st.plotly_chart(fig, use_container_width=True)
 
 
-
-
-
 def show_feature_distributions(df: pd.DataFrame):
     plot_df = get_display_dataframe(df)
 
@@ -780,15 +777,12 @@ def make_prediction_input(defaults: pd.Series) -> pd.DataFrame:
 
 
 def main():
-   
 
     BASE_DIR = Path(__file__).resolve().parent
     ROOT_DIR = BASE_DIR.parent
 
     horizontal_logo = ROOT_DIR / "Logo.png"
     icon = ROOT_DIR / "Icon.png"
-    # horizontal_logo = "../Logo.png"
-    # icon = "../Icon.png"
 
     st.set_page_config(
         page_title="Krisolis Data Readiness and Quality Demonstration",
