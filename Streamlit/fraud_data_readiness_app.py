@@ -748,29 +748,86 @@ def compare_all_datasets(max_depth: int, test_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def make_prediction_input(defaults: pd.Series) -> pd.DataFrame:
-    st.subheader("Make a Prediction for a New Transaction")
-    amount = st.sidebar.number_input("Transaction Amount", value=float(defaults.get("amount", 120.0)))
-    hour_of_day = st.sidebar.slider("Hour of Day", min_value=0, max_value=23, value=int(defaults.get("hour_of_day", 12)))
-    merchant_risk = st.sidebar.selectbox(
-        "Merchant Risk",
-        options=sorted(defaults.get("merchant_risk_options", ["High", "Low", "Medium"])),
-        index=1 if "Medium" in defaults.get("merchant_risk_options", ["High", "Low", "Medium"]) else 0,
+def make_prediction_input(defaults: pd.Series) -> tuple[pd.DataFrame, bool]:
+    merchant_risk_options = sorted(
+        defaults.get("merchant_risk_options", ["High", "Low", "Medium"])
     )
-    device_trusted = st.sidebar.selectbox("Trusted Device?", options=["Yes", "No"], index=0)
-    international = st.sidebar.selectbox("International Transaction?", options=["No", "Yes"], index=0)
-    card_present = st.sidebar.selectbox("Card Present?", options=["Yes", "No"], index=0)
-    transactions_last_24h = st.sidebar.number_input(
-        "Transactions in Last 24 Hours",
-        min_value=0,
-        value=int(defaults.get("transactions_last_24h", 2)),
-    )
-    account_age_days = st.sidebar.number_input(
-        "Account Age (days)",
-        min_value=0,
-        value=int(defaults.get("account_age_days", 365)),
-    )
-    return pd.DataFrame([
+
+    st.subheader("Enter Transaction Details")
+    st.markdown("Adjust the transaction features below, then click **Make Prediction**.")
+
+    with st.form("prediction_form", clear_on_submit=False):
+        row1_col1, row1_col2, row2_col1, row2_col2 = st.columns(4)
+        #row2_col1, row2_col2 = st.columns(2)
+
+        with row1_col1:
+            with st.container(border=True):
+                st.markdown("**Transaction Details**")
+                amount = st.number_input(
+                    "Transaction Amount",
+                    min_value=0.0,
+                    value=float(defaults.get("amount", 120.0)),
+                    step=1.0,
+                )
+                hour_of_day = st.slider(
+                    "Hour of Day",
+                    min_value=0,
+                    max_value=23,
+                    value=int(defaults.get("hour_of_day", 12)),
+                )
+
+        with row1_col2:
+            with st.container(border=True):
+                st.markdown("**Merchant & Channel**")
+                merchant_risk = st.selectbox(
+                    "Merchant Risk",
+                    options=merchant_risk_options,
+                    index=merchant_risk_options.index("Medium") if "Medium" in merchant_risk_options else 0,
+                )
+                
+                card_present = st.selectbox(
+                    "Card Present?",
+                    options=["Yes", "No"],
+                    index=0,
+                )
+
+        with row2_col1:
+            with st.container(border=True):
+                st.markdown("**Customer Context**")
+                device_trusted = st.selectbox(
+                    "Trusted Device?",
+                    options=["Yes", "No"],
+                    index=0,
+                )
+                account_age_days = st.number_input(
+                    "Account Age (days)",
+                    min_value=0,
+                    value=int(defaults.get("account_age_days", 365)),
+                    step=1,
+                )
+
+        with row2_col2:
+            with st.container(border=True):
+                st.markdown("**Activity Details**")
+                international = st.selectbox(
+                    "International Transaction?",
+                    options=["No", "Yes"],
+                    index=0,
+                )
+                transactions_last_24h = st.number_input(
+                    "Transactions Last 24 Hrs",
+                    min_value=0,
+                    value=int(defaults.get("transactions_last_24h", 2)),
+                    step=1,
+                )
+
+               
+            submitted = st.form_submit_button(
+                "Make Prediction",
+                use_container_width=True,
+            )
+
+    input_df = pd.DataFrame([
         {
             "amount": amount,
             "hour_of_day": hour_of_day,
@@ -782,6 +839,8 @@ def make_prediction_input(defaults: pd.Series) -> pd.DataFrame:
             "account_age_days": account_age_days,
         }
     ])
+
+    return input_df, submitted
 
 
 def train_good_baseline_model(max_depth: int = 3):
@@ -1332,9 +1391,9 @@ def main():
         merchant_risk_values = sorted(current_defaults["merchant_risk"].dropna().astype(str).unique().tolist())
         default_row = current_defaults.iloc[0].copy()
         default_row["merchant_risk_options"] = merchant_risk_values or ["High", "Low", "Medium"]
-        transaction_input = make_prediction_input(default_row)
+        transaction_input, submitted = make_prediction_input(default_row)
 
-        if st.button("Make Prediction", key="predict_obs"):
+        if submitted:
             pipeline = st.session_state["trained_pipeline"]
             clf = st.session_state["trained_model"]
             transformed_sample = pipeline.named_steps["preprocessor"].transform(transaction_input)
