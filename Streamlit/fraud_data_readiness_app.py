@@ -822,11 +822,12 @@ def make_prediction_input(defaults: pd.Series) -> tuple[pd.DataFrame, bool]:
                     value=float(defaults.get("amount", 120.0)),
                     step=1.0,
                 )
-                hour_of_day = st.slider(
+                hour_of_day = st.number_input(
                     "Hour of Day",
                     min_value=0,
                     max_value=23,
                     value=int(defaults.get("hour_of_day", 12)),
+                    step=1,
                 )
 
         with row1_col2:
