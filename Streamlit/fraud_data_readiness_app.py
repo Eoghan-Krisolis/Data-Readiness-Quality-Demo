@@ -1,7 +1,9 @@
 import os
 import re
 import json
+import tempfile
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -71,6 +73,7 @@ DATASET_LABELS = {
 
 @st.cache_data
 def load_csv_from_known_locations(filename: str) -> pd.DataFrame:
+    """Load a CSV from one of the known local deployment paths."""
     candidate_dirs = [Path("../Supervised-Data"), Path("."), Path(__file__).resolve().parent / "../Supervised-Data", Path(__file__).resolve().parent]
     for directory in candidate_dirs:
         path = directory / filename
@@ -82,7 +85,8 @@ def load_csv_from_known_locations(filename: str) -> pd.DataFrame:
 
 
 @st.cache_resource
-def get_one_hot_encoder():
+def get_one_hot_encoder() -> OneHotEncoder:
+    """Create a version-compatible one-hot encoder."""
     try:
         return OneHotEncoder(handle_unknown="ignore", sparse_output=False)
     except TypeError:
@@ -91,17 +95,20 @@ def get_one_hot_encoder():
 
 @st.cache_data
 def load_dataset(dataset_name: str) -> pd.DataFrame:
+    """Load and standardise a named training dataset."""
     df = load_csv_from_known_locations(DATASET_FILES[dataset_name]).copy()
     return standardise_dataframe(df)
 
 
 @st.cache_data
 def load_test_dataset() -> pd.DataFrame:
+    """Load and standardise the shared test dataset."""
     df = load_csv_from_known_locations(TEST_FILE).copy()
     return standardise_dataframe(df)
 
 
 def standardise_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """Validate the required schema and tidy column names."""
     df.columns = [str(c).strip() for c in df.columns]
     missing_cols = [c for c in FEATURE_COLUMNS + [TARGET_COLUMN] if c not in df.columns]
     if missing_cols:
@@ -110,12 +117,14 @@ def standardise_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def get_display_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """Add display-friendly target labels for plotting."""
     display_df = df.copy()
     display_df["target_name"] = display_df[TARGET_COLUMN].map({0: CLASS_NAMES[0], 1: CLASS_NAMES[1]})
     return display_df
 
 
 def build_pipeline(max_depth: int) -> Pipeline:
+    """Build the preprocessing and decision-tree pipeline."""
     # numeric_pipeline = Pipeline([
     #     ("imputer", SimpleImputer(strategy="median")),
     # ])
@@ -134,7 +143,8 @@ def build_pipeline(max_depth: int) -> Pipeline:
     ])
 
 
-def fit_model(df: pd.DataFrame, max_depth: int):
+def fit_model(df: pd.DataFrame, max_depth: int) -> tuple[Pipeline, DecisionTreeClassifier, np.ndarray, np.ndarray, list[str]]:
+    """Fit a model and return the fitted components used across the app."""
     X = df[FEATURE_COLUMNS].copy()
     y = df[TARGET_COLUMN].astype(int).to_numpy()
     pipeline = build_pipeline(max_depth)
@@ -147,7 +157,8 @@ def fit_model(df: pd.DataFrame, max_depth: int):
     return pipeline, clf, transformed_X, y, feature_names
 
 
-def ensure_trained_models_store():
+def ensure_trained_models_store() -> None:
+    """Ensure the per-dataset trained model store exists in session state."""
     if "trained_models" not in st.session_state:
         st.session_state["trained_models"] = {}
 
@@ -155,15 +166,16 @@ def ensure_trained_models_store():
 def save_trained_model_bundle(
     dataset_name: str,
     dataset_label: str,
-    pipeline,
-    clf,
-    X_train_transformed,
-    y_train,
-    feature_names,
-    viz_html,
-    test_predictions,
-    model_test_acc,
-):
+    pipeline: Pipeline,
+    clf: DecisionTreeClassifier,
+    X_train_transformed: np.ndarray,
+    y_train: np.ndarray,
+    feature_names: list[str],
+    viz_html: str,
+    test_predictions: np.ndarray,
+    model_test_acc: float,
+) -> None:
+    """Store a trained model bundle for the selected dataset in session state."""
     ensure_trained_models_store()
     st.session_state["trained_models"][dataset_name] = {
         "dataset_name": dataset_name,
@@ -179,7 +191,8 @@ def save_trained_model_bundle(
     }
 
 
-def get_trained_model_bundle(dataset_name: str):
+def get_trained_model_bundle(dataset_name: str) -> dict[str, Any] | None:
+    """Return the stored model bundle for a dataset if available."""
     ensure_trained_models_store()
     return st.session_state["trained_models"].get(dataset_name)
 
@@ -189,14 +202,16 @@ def has_trained_model(dataset_name: str) -> bool:
     return dataset_name in st.session_state["trained_models"]
 
 
-def clear_trained_model(dataset_name: str | None = None):
+def clear_trained_model(dataset_name: str | None = None) -> None:
+    """Clear one stored model bundle, or all if no dataset is provided."""
     ensure_trained_models_store()
     if dataset_name is None:
         st.session_state["trained_models"] = {}
     else:
         st.session_state["trained_models"].pop(dataset_name, None)
 
-def clear_all_trained_models():
+def clear_all_trained_models() -> None:
+    """Clear all stored trained model bundles."""
     st.session_state["trained_models"] = {}
 
 # def clear_trained_model():
@@ -242,21 +257,37 @@ def inject_supertree_class_colors(html_content: str) -> str:
 
 
 def get_current_page() -> str:
+    """Return the currently selected page from the sidebar."""
     return st.sidebar.selectbox("Page", ["Data/Model Explorer", "Make Predictions", "Model Evaluation", "Model Comparison","Continuous Monitoring"], index=0)
 
-def generate_vis(clf, X_transformed, y, feature_names, class_names, sample=None):
+def generate_vis(
+    clf: DecisionTreeClassifier,
+    X_transformed: np.ndarray,
+    y: np.ndarray,
+    feature_names: list[str],
+    class_names: list[str],
+    sample: np.ndarray | None = None,
+) -> str:
+    """Generate SuperTree HTML for a trained classifier."""
     super_tree = SuperTree(clf, X_transformed, y, feature_names, class_names)
-    html_filename = "supertree.html"
-    super_tree.save_html(html_filename)
-    with open(html_filename, "r", encoding="utf-8") as f:
-        html_content = f.read()
+    with tempfile.NamedTemporaryFile(mode="w+", suffix=".html", delete=False, encoding="utf-8") as tmp_file:
+        html_filename = tmp_file.name
+    try:
+        super_tree.save_html(html_filename)
+        with open(html_filename, "r", encoding="utf-8") as f:
+            html_content = f.read()
+    finally:
+        if os.path.exists(html_filename):
+            os.remove(html_filename)
+
     html_content = inject_supertree_class_colors(html_content)
     if sample is not None:
         html_content = inject_decision_path_css(html_content, clf, sample)
     return html_content
 
 
-def inject_decision_path_css(html_content, clf, sample):
+def inject_decision_path_css(html_content: str, clf: DecisionTreeClassifier, sample: np.ndarray) -> str:
+    """Inject CSS to highlight a sample path in the SuperTree HTML."""
     sample = np.array(sample).reshape(1, -1)
     decision_path = clf.decision_path(sample)
     node_ids = decision_path.nonzero()[1]
@@ -264,16 +295,19 @@ def inject_decision_path_css(html_content, clf, sample):
     return f"<style>{css_rules}</style>" + html_content
 
 
-def hex_to_rgb(hex_color):
+def hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+    """Convert a hex colour string to an RGB tuple."""
     hex_color = hex_color.lstrip("#")
     return tuple(int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
 
 
-def rgb_to_hex(rgb):
+def rgb_to_hex(rgb: tuple[int, int, int]) -> str:
+    """Convert an RGB tuple to a hex colour string."""
     return "#{:02X}{:02X}{:02X}".format(*rgb)
 
 
-def blend_colors(color1, color2, ratio):
+def blend_colors(color1: str, color2: str, ratio: float) -> str:
+    """Blend two colours by a given ratio."""
     r1, g1, b1 = hex_to_rgb(color1)
     r2, g2, b2 = hex_to_rgb(color2)
     r = int(r1 + (r2 - r1) * ratio)
@@ -282,7 +316,8 @@ def blend_colors(color1, color2, ratio):
     return rgb_to_hex((r, g, b))
 
 
-def get_path_in_order(clf, sample):
+def get_path_in_order(clf: DecisionTreeClassifier, sample: np.ndarray) -> list[int]:
+    """Return the node path followed by a sample through the tree."""
     tree = clf.tree_
     node = 0
     path = []
@@ -298,12 +333,19 @@ def get_path_in_order(clf, sample):
     return path
 
 
-def get_decision_path_edges(clf, sample):
+def get_decision_path_edges(clf: DecisionTreeClassifier, sample: np.ndarray) -> list[tuple[int, int]]:
+    """Return the ordered edges traversed by a sample through the tree."""
     path = get_path_in_order(clf, sample)
     return [(path[i], path[i + 1]) for i in range(len(path) - 1)]
 
 
-def highlight_dot(clf, sample, feature_names, class_names):
+def highlight_dot(
+    clf: DecisionTreeClassifier,
+    sample: np.ndarray,
+    feature_names: list[str],
+    class_names: list[str],
+) -> str:
+    """Return Graphviz DOT with the sample decision path highlighted."""
     dot_data = export_graphviz(
         clf,
         out_file=None,
@@ -378,7 +420,8 @@ def highlight_dot(clf, sample, feature_names, class_names):
     return "\n".join(new_lines)
 
 
-def compute_metrics(y_true, y_pred) -> dict:
+def compute_metrics(y_true: np.ndarray | pd.Series, y_pred: np.ndarray | pd.Series) -> dict[str, float]:
+    """Compute the core classification metrics used across the app."""
     return {
         "Accuracy": accuracy_score(y_true, y_pred),
         "Precision (Fraud)": precision_score(y_true, y_pred, zero_division=0),
@@ -387,7 +430,8 @@ def compute_metrics(y_true, y_pred) -> dict:
     }
 
 
-def plot_metrics_bar(metrics: dict, title: str = "Metric Scores"):
+def plot_metrics_bar(metrics: dict[str, float], title: str = "Metric Scores") -> None:
+    """Plot a compact metrics bar chart."""
     metric_df = pd.DataFrame({
         "Metric": list(metrics.keys()),
         "Score": list(metrics.values()),
@@ -413,7 +457,8 @@ def plot_metrics_bar(metrics: dict, title: str = "Metric Scores"):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def plot_class_balance(df: pd.DataFrame):
+def plot_class_balance(df: pd.DataFrame) -> None:
+    """Plot the target class balance for a dataset."""
     counts = (
         df[TARGET_COLUMN]
         .map({0: CLASS_NAMES[0], 1: CLASS_NAMES[1]})
@@ -464,7 +509,8 @@ def plot_class_balance(df: pd.DataFrame):
 #     st.plotly_chart(fig, use_container_width=True)
 
 
-def show_feature_distributions(df: pd.DataFrame):
+def show_feature_distributions(df: pd.DataFrame) -> None:
+    """Render dataset visualisations and summary statistics."""
     plot_df = get_display_dataframe(df)
 
     tab1, tab2 = st.tabs(["Data Visualisations", "Dataset Summary"])
@@ -734,12 +780,14 @@ def show_feature_distributions(df: pd.DataFrame):
             st.caption("Q1 = 25th percentile, Median = 50th percentile, Q3 = 75th percentile")
 
 
-def show_data_visualisation(df: pd.DataFrame):
+def show_data_visualisation(df: pd.DataFrame) -> None:
+    """Render the dataset exploration view."""
 
     show_feature_distributions(df)
 
 
-def dataset_health_summary(df: pd.DataFrame):
+def dataset_health_summary(df: pd.DataFrame) -> None:
+    """Show headline dataset health indicators."""
 
 
     duplicate_rows = int(df.duplicated().sum())
@@ -755,14 +803,16 @@ def dataset_health_summary(df: pd.DataFrame):
     #     st.caption(f"This dataset contains {invalid_amounts} transaction amounts below zero.")
 
 
-def display_metrics(metrics: dict, title: str):
+def display_metrics(metrics: dict[str, float], title: str) -> None:
+    """Display metrics as headline summary values."""
     st.markdown(f"**{title}**")
     cols = st.columns(len(metrics))
     for idx, (label, value) in enumerate(metrics.items()):
         cols[idx].metric(label, f"{value:.3f}")
 
 
-def plot_confusion(y_true, y_pred, title: str):
+def plot_confusion(y_true: np.ndarray | pd.Series, y_pred: np.ndarray | pd.Series, title: str) -> None:
+    """Plot a confusion matrix heatmap."""
     cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
     cm_df = pd.DataFrame(cm, index=CLASS_NAMES, columns=CLASS_NAMES)
     fig = px.imshow(
@@ -780,7 +830,9 @@ def plot_confusion(y_true, y_pred, title: str):
 
 
 def compare_all_datasets(max_depth: int, test_df: pd.DataFrame) -> pd.DataFrame:
+    """Train and evaluate each dataset for anonymous side-by-side comparison."""
     rows = []
+    reverse_labels = {value: key for key, value in DATASET_LABELS.items()}
     for dataset_name in DATASET_FILES:
         train_df = load_dataset(dataset_name)
         pipeline, clf, X_train_transformed, y_train, feature_names = fit_model(train_df, max_depth)
@@ -789,19 +841,18 @@ def compare_all_datasets(max_depth: int, test_df: pd.DataFrame) -> pd.DataFrame:
         train_metrics = compute_metrics(y_train, y_train_pred)
         test_metrics = compute_metrics(test_df[TARGET_COLUMN].astype(int), y_test_pred)
         rows.append({
-            "Dataset": dataset_name,
+            "Dataset": reverse_labels.get(dataset_name, dataset_name),
             "Train Accuracy": train_metrics["Accuracy"],
             "Test Accuracy": test_metrics["Accuracy"],
             "Test Precision (Fraud)": test_metrics["Precision (Fraud)"],
             "Test Recall (Fraud)": test_metrics["Recall (Fraud)"],
             "Test F1-score (Fraud)": test_metrics["F1-score (Fraud)"],
-            # "Tree Depth": clf.get_depth(),
-            # "Leaves": clf.get_n_leaves(),
         })
     return pd.DataFrame(rows)
 
 
 def make_prediction_input(defaults: pd.Series) -> tuple[pd.DataFrame, bool]:
+    """Render prediction inputs in the main page and return the values plus submit state."""
     merchant_risk_options = sorted(
         defaults.get("merchant_risk_options", ["High", "Low", "Medium"])
     )
@@ -810,10 +861,9 @@ def make_prediction_input(defaults: pd.Series) -> tuple[pd.DataFrame, bool]:
     st.markdown("Adjust the transaction features below, then click **Make Prediction**.")
 
     with st.form("prediction_form", clear_on_submit=False):
-        row1_col1, row1_col2, row2_col1, row2_col2 = st.columns(4)
-        #row2_col1, row2_col2 = st.columns(2)
+        details_col, merchant_col, customer_col, activity_col = st.columns(4)
 
-        with row1_col1:
+        with details_col:
             with st.container(border=True):
                 st.markdown("**Transaction Details**")
                 amount = st.number_input(
@@ -830,7 +880,7 @@ def make_prediction_input(defaults: pd.Series) -> tuple[pd.DataFrame, bool]:
                     step=1,
                 )
 
-        with row1_col2:
+        with merchant_col:
             with st.container(border=True):
                 st.markdown("**Merchant & Channel**")
                 merchant_risk = st.selectbox(
@@ -838,14 +888,13 @@ def make_prediction_input(defaults: pd.Series) -> tuple[pd.DataFrame, bool]:
                     options=merchant_risk_options,
                     index=merchant_risk_options.index("Medium") if "Medium" in merchant_risk_options else 0,
                 )
-                
                 card_present = st.selectbox(
                     "Card Present?",
                     options=["Yes", "No"],
                     index=0,
                 )
 
-        with row2_col1:
+        with customer_col:
             with st.container(border=True):
                 st.markdown("**Customer Context**")
                 device_trusted = st.selectbox(
@@ -860,7 +909,7 @@ def make_prediction_input(defaults: pd.Series) -> tuple[pd.DataFrame, bool]:
                     step=1,
                 )
 
-        with row2_col2:
+        with activity_col:
             with st.container(border=True):
                 st.markdown("**Activity Details**")
                 international = st.selectbox(
@@ -869,13 +918,12 @@ def make_prediction_input(defaults: pd.Series) -> tuple[pd.DataFrame, bool]:
                     index=0,
                 )
                 transactions_last_24h = st.number_input(
-                    "Transactions Last 24 Hrs",
+                    "Transactions in Last 24 Hours",
                     min_value=0,
                     value=int(defaults.get("transactions_last_24h", 2)),
                     step=1,
                 )
 
-               
             submitted = st.form_submit_button(
                 "Make Prediction",
                 use_container_width=True,
@@ -897,7 +945,9 @@ def make_prediction_input(defaults: pd.Series) -> tuple[pd.DataFrame, bool]:
     return input_df, submitted
 
 
-def train_good_baseline_model(max_depth: int = 3):
+@st.cache_resource
+def train_good_baseline_model(max_depth: int = 3) -> dict[str, Any]:
+    """Train and cache the fixed monitoring baseline model."""
     good_df = load_dataset("Dataset C - Good Quality")
     pipeline, clf, X_train_transformed, y_train, feature_names = fit_model(good_df, max_depth)
     return {
@@ -916,6 +966,7 @@ def generate_monitoring_scenario_batch(
     batch_size: int = 300,
     random_state: int = 42,
 ) -> pd.DataFrame:
+    """Generate a synthetic monitoring batch for the chosen scenario and period."""
     rng = np.random.default_rng(random_state + period)
 
     df = pd.DataFrame({
@@ -935,7 +986,7 @@ def generate_monitoring_scenario_batch(
 
     # Scenario B - Feature Drift
     elif scenario == "Scenario B - Feature Drift":
-        drift_strength = min(period / 8, 1.0)
+        drift_strength = period / 12
         # Amounts gradually increase
         df["amount"] = df["amount"] * (1 + 0.5 * drift_strength)
 
@@ -953,7 +1004,7 @@ def generate_monitoring_scenario_batch(
 
     # Scenario C - Concept Drift
     elif scenario == "Scenario C - Concept Drift":
-        drift_strength = min(period / 8, 1.0)
+        drift_strength = period / 12
         df["amount"] = df["amount"] * (1 + 0.1 * drift_strength)
 
     # Original target rule (same as good-quality signal)
@@ -988,10 +1039,11 @@ def generate_monitoring_scenario_batch(
 
 def build_monitoring_history(
     scenario: str,
-    pipeline,
+    pipeline: Pipeline,
     periods: int = 8,
     batch_size: int = 300,
-):
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[int, pd.DataFrame]]:
+    """Build monitoring metrics, prediction mix and scenario batches over time."""
     rows = []
     prediction_rows = []
     batches = {}
@@ -1035,7 +1087,8 @@ def build_monitoring_history(
     return history_df, prediction_dist_df, batches
 
 
-def plot_monitoring_metric_trends(history_df: pd.DataFrame):
+def plot_monitoring_metric_trends(history_df: pd.DataFrame) -> None:
+    """Plot monitoring metrics across periods."""
     metric_df = history_df.melt(
         id_vars=["Period"],
         value_vars=["Accuracy", "Precision (Fraud)", "Recall (Fraud)", "F1-score (Fraud)"],
@@ -1055,7 +1108,8 @@ def plot_monitoring_metric_trends(history_df: pd.DataFrame):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def plot_prediction_distribution_over_time(prediction_dist_df: pd.DataFrame):
+def plot_prediction_distribution_over_time(prediction_dist_df: pd.DataFrame) -> None:
+    """Plot how the model prediction mix evolves over time."""
     fig = px.bar(
         prediction_dist_df,
         x="Period",
@@ -1072,7 +1126,14 @@ def plot_prediction_distribution_over_time(prediction_dist_df: pd.DataFrame):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def plot_feature_drift_over_time(reference_df: pd.DataFrame, current_df: pd.DataFrame, feature: str, period: int, normalise: bool):
+def plot_feature_drift_over_time(
+    reference_df: pd.DataFrame,
+    current_df: pd.DataFrame,
+    feature: str,
+    period: int,
+    normalise: bool,
+) -> None:
+    """Plot reference versus current feature distributions for drift inspection."""
     ref_plot = reference_df[[feature]].copy()
     ref_plot["Dataset"] = "Reference (Good Data)"
     cur_plot = current_df[[feature]].copy()
@@ -1124,7 +1185,8 @@ def plot_feature_drift_over_time(reference_df: pd.DataFrame, current_df: pd.Data
 
 
 
-def main():
+def main() -> None:
+    """Run the Streamlit application."""
 
     BASE_DIR = Path(__file__).resolve().parent
     ROOT_DIR = BASE_DIR.parent
@@ -1182,7 +1244,7 @@ def main():
 
     if current_page == "Data/Model Explorer":
         st.header(
-            f"Chosen Datset: {dataset_label}",
+            f"Chosen Dataset: {dataset_label}",
             help="Explore the selected dataset before training the model.",
         )
         dataset_health_summary(selected_df)
@@ -1328,9 +1390,9 @@ def main():
             y="Score",
             color="Dataset",
             color_discrete_map={
-                "Dataset A - Poor Quality": "#F60B75",  
-                "Dataset B - Imbalanced": "#FFA500",          
-                "Dataset C - Good Quality": "#00D3CF",  
+                "Dataset 1": "#F60B75",
+                "Dataset 2": "#FFA500",
+                "Dataset 3": "#00D3CF",
             },
             barmode="group",
             text="Score",
@@ -1362,10 +1424,10 @@ def main():
         st.header("Model Evaluation")
         model_bundle = get_trained_model_bundle(dataset_name)
         if model_bundle is None:
-            st.info("Train your chosen model on the Model Explorer page first, then come back here to examine the its metrics when evaluated on a balanced test set.")
+            st.info("Train your chosen model on the Data/Model Explorer page first, then come back here to examine its metrics when evaluated on a balanced test set.")
             return
         else:
-            test_predictions = model_bundle["pipeline"].predict(test_df[FEATURE_COLUMNS])
+            test_predictions = model_bundle["test_predictions"]
             test_metrics = compute_metrics(test_df[TARGET_COLUMN].astype(int), test_predictions)
             display_metrics(test_metrics, "Metrics")
 
@@ -1453,7 +1515,7 @@ def main():
         st.markdown("Use a trained model to score a new transaction and inspect its decision path.")
         model_bundle = get_trained_model_bundle(dataset_name)
         if model_bundle is None:    
-            st.info("Train your choen model on the Model Explorer page first, then come back here to make a prediction.")
+            st.info("Train your chosen model on the Data/Model Explorer page first, then come back here to make a prediction.")
             return
 
         current_defaults = selected_df[FEATURE_COLUMNS].copy()
