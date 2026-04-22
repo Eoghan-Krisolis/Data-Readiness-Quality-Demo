@@ -58,6 +58,16 @@ DATASET_DESCRIPTIONS = {
     "Dataset C - Good Quality": "This dataset is clean, more balanced and has a stronger fraud signal. It is intended to show what a more useful and interpretable tree looks like when the data is ready for modelling.",
 }
 
+MONITORING_SCENARIOS = {
+    "Scenario 1": "Scenario A - Stable",
+    "Scenario 2": "Scenario B - Feature Drift",
+    "Scenario 3": "Scenario C - Concept Drift",
+}
+DATASET_LABELS = {
+    "Dataset 1": "Dataset A - Poor Quality",
+    "Dataset 2": "Dataset B - Imbalanced",
+    "Dataset 3": "Dataset C - Good Quality",
+}
 
 @st.cache_data
 def load_csv_from_known_locations(filename: str) -> pd.DataFrame:
@@ -179,7 +189,7 @@ def inject_supertree_class_colors(html_content: str) -> str:
 
 
 def get_current_page() -> str:
-    return st.sidebar.selectbox("Page", ["Model Explorer", "Make Predictions", "Model Evaluation", "Model Comparison","Continuous Monitoring"], index=0)
+    return st.sidebar.selectbox("Page", ["Data/Model Explorer", "Make Predictions", "Model Evaluation", "Model Comparison","Continuous Monitoring"], index=0)
 
 def generate_vis(clf, X_transformed, y, feature_names, class_names, sample=None):
     super_tree = SuperTree(clf, X_transformed, y, feature_names, class_names)
@@ -774,10 +784,23 @@ def make_prediction_input(defaults: pd.Series) -> pd.DataFrame:
     ])
 
 
-def generate_monitoring_batch(
-    batch_size: int,
+def train_good_baseline_model(max_depth: int = 3):
+    good_df = load_dataset("Dataset C - Good Quality")
+    pipeline, clf, X_train_transformed, y_train, feature_names = fit_model(good_df, max_depth)
+    return {
+        "pipeline": pipeline,
+        "clf": clf,
+        "train_df": good_df,
+        "X_train_transformed": X_train_transformed,
+        "y_train": y_train,
+        "feature_names": feature_names,
+    }
+
+
+def generate_monitoring_scenario_batch(
+    scenario: str,
     period: int,
-    scenario: str = "Stable",
+    batch_size: int = 300,
     random_state: int = 42,
 ) -> pd.DataFrame:
     rng = np.random.default_rng(random_state + period)
@@ -793,35 +816,35 @@ def generate_monitoring_batch(
         "account_age_days": rng.integers(10, 2000, batch_size),
     })
 
-    if scenario == "Gradual Drift":
-        drift_strength = min(period / 10, 1.0)
+    # Scenario A - Stable
+    if scenario == "Scenario A - Stable":
+        pass
 
-        df["amount"] = df["amount"] * (1 + 0.35 * drift_strength)
-        df["transactions_last_24h"] = df["transactions_last_24h"] + rng.poisson(2 * drift_strength, batch_size)
+    # Scenario B - Feature Drift
+    elif scenario == "Scenario B - Feature Drift":
+        drift_strength = min(period / 8, 1.0)
+        # Amounts gradually increase
+        df["amount"] = df["amount"] * (1 + 0.5 * drift_strength)
+
+        # Transactions gradually shift toward later hours
+        shifted_hours = df["hour_of_day"] + rng.integers(0, int(6 * drift_strength) + 1, batch_size)
+        df["hour_of_day"] = np.clip(shifted_hours, 0, 23)
+
+        # Other mild distribution drift
         df["international"] = rng.choice(
             ["Yes", "No"],
             batch_size,
-            p=[0.4 + 0.3 * drift_strength, 0.6 - 0.3 * drift_strength],
+            p=[0.4 + 0.35 * drift_strength, 0.6 - 0.35 * drift_strength],
         )
-        df["device_trusted"] = rng.choice(
-            ["Yes", "No"],
-            batch_size,
-            p=[0.6 - 0.2 * drift_strength, 0.4 + 0.2 * drift_strength],
-        )
+        df["transactions_last_24h"] = df["transactions_last_24h"] + rng.poisson(2 * drift_strength, batch_size)
 
-    elif scenario == "Sudden Drift":
-        if period >= 6:
-            df["amount"] = df["amount"] * 1.6
-            df["merchant_risk"] = rng.choice(["Low", "Medium", "High"], batch_size, p=[0.15, 0.35, 0.50])
-            df["international"] = rng.choice(["Yes", "No"], batch_size, p=[0.75, 0.25])
-            df["device_trusted"] = rng.choice(["Yes", "No"], batch_size, p=[0.35, 0.65])
-            df["transactions_last_24h"] = df["transactions_last_24h"] + rng.poisson(3, batch_size)
+    # Scenario C - Concept Drift
+    elif scenario == "Scenario C - Concept Drift":
+        drift_strength = min(period / 8, 1.0)
+        df["amount"] = df["amount"] * (1 + 0.1 * drift_strength)
 
-    elif scenario == "Concept Drift":
-        # Features shift only mildly, but target logic changes later
-        df["amount"] = df["amount"] * (1 + 0.1 * min(period / 10, 1.0))
-
-    score = (
+    # Original target rule (same as good-quality signal)
+    base_score = (
         (df["amount"] > 250).astype(int) * 2
         + (df["merchant_risk"] == "High").astype(int) * 3
         + (df["international"] == "Yes").astype(int) * 2
@@ -830,16 +853,18 @@ def generate_monitoring_batch(
         + (df["account_age_days"] < 200).astype(int) * 1
     )
 
-    if scenario == "Concept Drift" and period >= 6:
+    # Concept drift: later periods use a changed fraud rule
+    if scenario == "Scenario C - Concept Drift" and period >= 4:
         score = (
             (df["amount"] > 320).astype(int) * 1
             + (df["merchant_risk"] == "High").astype(int) * 2
             + (df["international"] == "Yes").astype(int) * 1
-            + (df["device_trusted"] == "No").astype(int) * 1
             + (df["card_present"] == "No").astype(int) * 2
             + (df["hour_of_day"].isin([0, 1, 2, 3, 4])).astype(int) * 2
             + (df["transactions_last_24h"] > 7).astype(int) * 2
         )
+    else:
+        score = base_score
 
     prob = score / max(score.max(), 1)
     prob = prob * 0.9 + rng.uniform(0, 0.1, batch_size)
@@ -848,24 +873,53 @@ def generate_monitoring_batch(
     return df
 
 
-def summarise_batch_drift(reference_df: pd.DataFrame, current_df: pd.DataFrame) -> pd.DataFrame:
+def build_monitoring_history(
+    scenario: str,
+    pipeline,
+    periods: int = 8,
+    batch_size: int = 300,
+):
     rows = []
+    prediction_rows = []
+    batches = {}
 
-    for col in NUMERIC_COLUMNS:
-        ref_mean = pd.to_numeric(reference_df[col], errors="coerce").mean()
-        cur_mean = pd.to_numeric(current_df[col], errors="coerce").mean()
-        delta = cur_mean - ref_mean
-        pct_delta = 0.0 if pd.isna(ref_mean) or ref_mean == 0 else delta / ref_mean
+    for period in range(1, periods + 1):
+        batch_df = generate_monitoring_scenario_batch(
+            scenario=scenario,
+            period=period,
+            batch_size=batch_size,
+            random_state=42,
+        )
+
+        y_true = batch_df[TARGET_COLUMN].astype(int)
+        y_pred = pipeline.predict(batch_df[FEATURE_COLUMNS])
+        metrics = compute_metrics(y_true, y_pred)
+
+        pred_labels = pd.Series(y_pred).map({0: CLASS_NAMES[0], 1: CLASS_NAMES[1]})
+        pred_counts = (
+            pred_labels.value_counts(normalize=True)
+            .reindex(CLASS_NAMES, fill_value=0)
+            .reset_index()
+        )
+        pred_counts.columns = ["Predicted Class", "Proportion"]
+        pred_counts["Period"] = period
+
+        prediction_rows.append(pred_counts)
 
         rows.append({
-            "Feature": col,
-            "Reference Mean": ref_mean,
-            "Current Mean": cur_mean,
-            "Absolute Change": delta,
-            "Relative Change": pct_delta,
+            "Period": period,
+            "Accuracy": metrics["Accuracy"],
+            "Precision (Fraud)": metrics["Precision (Fraud)"],
+            "Recall (Fraud)": metrics["Recall (Fraud)"],
+            "F1-score (Fraud)": metrics["F1-score (Fraud)"],
         })
 
-    return pd.DataFrame(rows)
+        batches[period] = batch_df
+
+    history_df = pd.DataFrame(rows)
+    prediction_dist_df = pd.concat(prediction_rows, ignore_index=True)
+
+    return history_df, prediction_dist_df, batches
 
 
 def plot_monitoring_metric_trends(history_df: pd.DataFrame):
@@ -882,19 +936,43 @@ def plot_monitoring_metric_trends(history_df: pd.DataFrame):
         y="Score",
         color="Metric",
         markers=True,
-        title="Model Performance Over Time",
+        title="Performance Over Time",
     )
     fig.update_layout(yaxis=dict(range=[0, 1], tickformat=".1f"))
     st.plotly_chart(fig, use_container_width=True)
 
 
-def plot_monitoring_feature_shift(reference_df: pd.DataFrame, current_df: pd.DataFrame, feature: str):
+def plot_prediction_distribution_over_time(prediction_dist_df: pd.DataFrame):
+    fig = px.bar(
+        prediction_dist_df,
+        x="Period",
+        y="Proportion",
+        color="Predicted Class",
+        barmode="stack",
+        color_discrete_map={
+            CLASS_NAMES[0]: COLOUR_SEQUENCE[0],
+            CLASS_NAMES[1]: COLOUR_SEQUENCE[1],
+        },
+        title="Distribution of Model Predictions Over Time",
+    )
+    fig.update_layout(yaxis=dict(range=[0, 1], tickformat=".0%"))
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def plot_feature_drift_over_time(reference_df: pd.DataFrame, current_df: pd.DataFrame, feature: str, period: int, normalise: bool):
     ref_plot = reference_df[[feature]].copy()
-    ref_plot["Dataset"] = "Reference"
+    ref_plot["Dataset"] = "Reference (Good Data)"
     cur_plot = current_df[[feature]].copy()
-    cur_plot["Dataset"] = "Current Batch"
+    cur_plot["Dataset"] = f"Period {period}"
 
     combined = pd.concat([ref_plot, cur_plot], ignore_index=True)
+    if normalise:
+        histnorm_a="probability density"
+        histnorm_b="percent"
+    else:
+        histnorm_a=histnorm_b=None
+
+
 
     if feature in NUMERIC_COLUMNS:
         fig = px.histogram(
@@ -904,12 +982,14 @@ def plot_monitoring_feature_shift(reference_df: pd.DataFrame, current_df: pd.Dat
             barmode="overlay",
             nbins=30,
             opacity=0.7,
+            histnorm=histnorm_a,
             color_discrete_map={
-                "Reference": COLOUR_SEQUENCE[0],
-                "Current Batch": COLOUR_SEQUENCE[1],
+                "Reference (Good Data)": COLOUR_SEQUENCE[0],
+                f"Period {period}": COLOUR_SEQUENCE[1],
             },
-            title=f"Feature Drift Check: {feature.replace('_', ' ').title()}",
+            title=f"Feature Drift: {feature.replace('_', ' ').title()}",
         )
+        
     else:
         combined[feature] = combined[feature].fillna("Missing").astype(str)
         fig = px.histogram(
@@ -917,37 +997,16 @@ def plot_monitoring_feature_shift(reference_df: pd.DataFrame, current_df: pd.Dat
             x=feature,
             color="Dataset",
             barmode="group",
+            histnorm=histnorm_b,
             color_discrete_map={
-                "Reference": COLOUR_SEQUENCE[0],
-                "Current Batch": COLOUR_SEQUENCE[1],
+                "Reference (Good Data)": COLOUR_SEQUENCE[0],
+                f"Period {period}": COLOUR_SEQUENCE[1],
             },
-            title=f"Feature Drift Check: {feature.replace('_', ' ').title()}",
+            title=f"Feature Drift: {feature.replace('_', ' ').title()}",
         )
+    
 
     st.plotly_chart(fig, use_container_width=True)
-
-
-def monitoring_alerts(history_df: pd.DataFrame, recall_threshold: float, accuracy_drop_threshold: float):
-    latest = history_df.iloc[-1]
-    first = history_df.iloc[0]
-
-    alerts = []
-
-    if latest["Recall (Fraud)"] < recall_threshold:
-        alerts.append(f"Recall has dropped below threshold ({latest['Recall (Fraud)']:.3f} < {recall_threshold:.3f}).")
-
-    if first["Accuracy"] - latest["Accuracy"] > accuracy_drop_threshold:
-        alerts.append(
-            f"Accuracy has fallen by more than the allowed margin "
-            f"({first['Accuracy'] - latest['Accuracy']:.3f} > {accuracy_drop_threshold:.3f})."
-        )
-
-    if alerts:
-        for alert in alerts:
-            st.error(f"⚠️ {alert}")
-        st.warning("Monitoring suggests this model may need investigation, retraining, or updated thresholds.")
-    else:
-        st.success("No monitoring alerts triggered under the current thresholds.")
 
 
 
@@ -961,12 +1020,12 @@ def main():
     icon = ROOT_DIR / "Icon.png"
 
     st.set_page_config(
-        page_title="Krisolis Data Readiness and Quality Demonstration",
+        page_title="Krisolis Data Quality, Evaluation and Monitoring Demonstration",
         page_icon=icon,
         layout="wide",
         initial_sidebar_state="expanded",
         menu_items={
-            "About": """# Krisolis Data Readiness and Quality Demonstration.
+            "About": """# Krisolis Data Quality, Evaluation and Monitoring Demonstration.
             Created by Eoghan Staunton @Krisolis
             Using scikit-learn, supertree, pandas and plotly""",
         },
@@ -974,22 +1033,25 @@ def main():
     if os.path.exists(horizontal_logo) and os.path.exists(icon):
         st.logo(horizontal_logo, size="large", link="http://www.krisolis.ie", icon_image=icon)
 
-    st.title("Data Readiness and Quality Demonstration")
+    st.title("Data Quality, Evaluation and Monitoring")
     st.markdown(
-        "This app demonstrates a **Decision Tree Classifier** on three transaction fraud datasets. Each dataset represents a different level of data readiness so learners can compare the model structure and the performance produced by the same algorithm when training on different datasets.",
+        "This app demonstrates how data quality, class balance, and evolving data conditions impact a **Decision Tree Classifier** in a fraud detection setting. Learners can explore datasets, train and compare models, make predictions, and investigate how model performance changes over time under different monitoring scenarios.",
     )
 
     st.sidebar.subheader("Choose Page")
     current_page = get_current_page()
 
-    if current_page != "Model Comparison":
+    if current_page not in ["Model Comparison", "Continuous Monitoring"]:
 
         st.sidebar.subheader("Choose Dataset")
-        dataset_name = st.sidebar.radio(
+        dataset_label = st.sidebar.radio(
             "Training Dataset",
-            options=list(DATASET_FILES.keys()),
+            options=list(DATASET_LABELS.keys()),
             help="Choose a dataset to explore before training a model",
         )
+
+        dataset_name = DATASET_LABELS[dataset_label]
+        
         st.session_state["dataset_name"] = dataset_name
 
     # st.sidebar.subheader("Set maximum tree depth")
@@ -1005,9 +1067,9 @@ def main():
         st.error(str(exc))
         st.stop()
 
-    if current_page == "Model Explorer":
+    if current_page == "Data/Model Explorer":
         st.header(
-            f"Chosen Datset: {dataset_name}",
+            f"Chosen Datset: {dataset_label}",
             help="Explore the selected dataset before training the model.",
         )
         dataset_health_summary(selected_df)
@@ -1024,12 +1086,13 @@ def main():
             st.session_state["X_train_transformed"] = X_train_transformed
             st.session_state["y_train"] = y_train
             st.session_state["dataset_name"] = dataset_name
+            st.session_state["dataset_label"] = dataset_label
             st.session_state["viz_html"] = generate_vis(clf, X_train_transformed, y_train, feature_names, CLASS_NAMES)
             st.session_state["model_trained"] = True
             st.session_state["test_preds"]  = pipeline.predict(test_df[FEATURE_COLUMNS])
             st.session_state["model_test_acc"] = accuracy_score(test_df[TARGET_COLUMN],st.session_state["test_preds"])
             #st.balloons()
-            st.toast(f"**Model Trained With** {st.session_state["dataset_name"]}.\n **Test Accuracy:** {st.session_state["model_test_acc"]:.3f}", icon="🤖")
+            st.toast(f"**Model Trained With** {st.session_state["dataset_label"]}.\n **Test Accuracy:** {st.session_state["model_test_acc"]:.3f}", icon="🤖")
 
         if st.session_state["model_trained"]:
             if st.sidebar.button("Reset to Data Exploration"):
@@ -1042,7 +1105,7 @@ def main():
             return
         
 
-        st.subheader(f"Trained Decision Tree on {dataset_name}")#st.subheader(f"Trained {max_depth}-Level Decision Tree")
+        st.subheader(f"Trained Decision Tree on {dataset_label}")#st.subheader(f"Trained {max_depth}-Level Decision Tree")
         st.markdown(f"**Test Accuracy = {st.session_state["model_test_acc"]:.3f}**")
         st.components.v1.html(st.session_state["viz_html"], height=600)
 
@@ -1187,171 +1250,72 @@ def main():
     elif current_page == "Continuous Monitoring":
         st.header("Continuous Monitoring")
         st.markdown(
-            "This page simulates how model performance can change over time as production data evolves. "
-            "It is designed to introduce concepts such as data drift, concept drift, alerting, and retraining decisions."
+            "This page simulates how a model trained on good-quality data behaves over time in production."
+        )
+        st.markdown(
+            "Your task is to inspect the monitoring outputs and decide what kind of situation you are seeing."
         )
 
-        if (
-            not st.session_state.get("model_trained", False)
-            or st.session_state.get("dataset_name") != dataset_name
-        ):
-            st.info(
-                "Train your chosen model on the Model Explorer page first, then come back here to simulate production monitoring."
-            )
-            return
+        monitoring_model = train_good_baseline_model(max_depth=max_depth)
+        baseline_pipeline = monitoring_model["pipeline"]
+        baseline_reference_df = monitoring_model["train_df"]
 
-        reference_df = selected_df.copy()
+        scenario_label = st.selectbox(
+            "Choose Scenario",
+            list(MONITORING_SCENARIOS.keys()),
+            help="Each scenario represents a different production monitoring situation.",
+        )
 
-        controls_col1, controls_col2, controls_col3, controls_col4 = st.columns(4)
+        scenario = MONITORING_SCENARIOS[scenario_label]
 
-        with controls_col1:
-            scenario = st.selectbox(
-                "Monitoring Scenario",
-                ["Stable", "Gradual Drift", "Sudden Drift", "Concept Drift"],
-                help="Choose how the incoming production data changes over time.",
-            )
+        history_df, prediction_dist_df, scenario_batches = build_monitoring_history(
+            scenario=scenario,
+            pipeline=baseline_pipeline,
+            periods=12,
+            batch_size=300,
+        )
 
-        with controls_col2:
-            num_periods = st.slider(
-                "Number of Monitoring Periods",
-                min_value=4,
-                max_value=12,
-                value=8,
-                step=1,
-            )
-
-        with controls_col3:
-            batch_size = st.slider(
-                "Batch Size",
-                min_value=100,
-                max_value=1000,
-                value=300,
-                step=50,
-            )
-
-        with controls_col4:
-            feature_to_monitor = st.selectbox(
-                "Feature to Inspect for Drift",
-                FEATURE_COLUMNS,
-            )
-
-        alert_col1, alert_col2 = st.columns(2)
-        with alert_col1:
-            recall_threshold = st.slider(
-                "Recall Alert Threshold",
-                min_value=0.0,
-                max_value=1.0,
-                value=0.60,
-                step=0.05,
-            )
-        with alert_col2:
-            accuracy_drop_threshold = st.slider(
-                "Allowed Accuracy Drop",
-                min_value=0.0,
-                max_value=0.5,
-                value=0.10,
-                step=0.01,
-            )
-
-        pipeline = st.session_state["trained_pipeline"]
-
-        monitoring_rows = []
-        current_batch = None
-
-        for period in range(1, num_periods + 1):
-            batch_df = generate_monitoring_batch(
-                batch_size=batch_size,
-                period=period,
-                scenario=scenario,
-                random_state=42,
-            )
-            current_batch = batch_df
-
-            y_true = batch_df[TARGET_COLUMN].astype(int)
-            y_pred = pipeline.predict(batch_df[FEATURE_COLUMNS])
-            metrics = compute_metrics(y_true, y_pred)
-
-            monitoring_rows.append({
-                "Period": period,
-                "Accuracy": metrics["Accuracy"],
-                "Precision (Fraud)": metrics["Precision (Fraud)"],
-                "Recall (Fraud)": metrics["Recall (Fraud)"],
-                "F1-score (Fraud)": metrics["F1-score (Fraud)"],
-                "Observed Fraud Rate": float(y_true.mean()),
-            })
-
-        history_df = pd.DataFrame(monitoring_rows)
-
-        latest_metrics = {
-            "Accuracy": history_df.iloc[-1]["Accuracy"],
-            "Precision (Fraud)": history_df.iloc[-1]["Precision (Fraud)"],
-            "Recall (Fraud)": history_df.iloc[-1]["Recall (Fraud)"],
-            "F1-score (Fraud)": history_df.iloc[-1]["F1-score (Fraud)"],
-        }
-
-        st.subheader("Latest Monitoring Snapshot")
-        snapshot_col1, snapshot_col2, snapshot_col3 = st.columns(3)
-        with snapshot_col1:
-            display_metrics(latest_metrics, "Current Period Metrics")
-        with snapshot_col2:
-            plot_metrics_bar(latest_metrics, "Current Period Metric Comparison")
-        with snapshot_col3:
-            latest_preds = pipeline.predict(current_batch[FEATURE_COLUMNS])
-            plot_confusion(
-                current_batch[TARGET_COLUMN].astype(int),
-                latest_preds,
-                "Current Period Confusion Matrix",
-            )
-
-        st.subheader("Performance Over Time")
+        st.subheader("1. Performance Evolution")
         plot_monitoring_metric_trends(history_df)
 
-        trend_aux_col1, trend_aux_col2 = st.columns(2)
+        st.subheader("2. Distribution of Predictions Over Time")
+        plot_prediction_distribution_over_time(prediction_dist_df)
 
-        with trend_aux_col1:
-            fraud_rate_fig = px.line(
-                history_df,
-                x="Period",
-                y="Observed Fraud Rate",
-                markers=True,
-                title="Observed Fraud Rate Over Time",
+        st.subheader("3. Feature Drift Inspection")
+        drift_col1, drift_col2, drift_col3 = st.columns(3)
+        with drift_col1:
+            feature_to_monitor = st.selectbox(
+                "Choose Feature to Monitor",
+                FEATURE_COLUMNS,
             )
-            fraud_rate_fig.update_layout(yaxis=dict(range=[0, 1], tickformat=".1f"))
-            st.plotly_chart(fraud_rate_fig, use_container_width=True)
-
-        with trend_aux_col2:
-            drift_summary = summarise_batch_drift(reference_df, current_batch)
-            st.markdown("**Numerical Drift Summary (Reference vs Latest Batch)**")
-            st.dataframe(
-                drift_summary.style.format({
-                    "Reference Mean": "{:.2f}",
-                    "Current Mean": "{:.2f}",
-                    "Absolute Change": "{:.2f}",
-                    "Relative Change": "{:.1%}",
-                }),
-                use_container_width=True,
-                hide_index=True,
+        with drift_col2:
+            selected_period = st.slider(
+                "Choose Period",
+                min_value=1,
+                max_value=12,
+                value=12,
+                step=1,
             )
-
-        st.subheader("Feature Drift Inspection")
-        plot_monitoring_feature_shift(reference_df, current_batch, feature_to_monitor)
-
-        st.subheader("Monitoring Alerts")
-        monitoring_alerts(
-            history_df,
-            recall_threshold=recall_threshold,
-            accuracy_drop_threshold=accuracy_drop_threshold,
+        with drift_col3:
+            st.markdown("Normalise")
+            normalise = st.checkbox("Show Densities", help="Make the comparison based on proportions (densities) rather than counts.")
+        plot_feature_drift_over_time(
+            reference_df=baseline_reference_df,
+            current_df=scenario_batches[selected_period],
+            feature=feature_to_monitor,
+            period=selected_period,
+            normalise=normalise
         )
 
-        st.subheader("Discussion Prompts")
-        st.markdown(
-            """
-            - Is the model still performing well enough for the business objective?
-            - Which metric would you prioritise monitoring for fraud detection?
-            - Does the issue look more like data drift or concept drift?
-            - Would you retrain immediately, investigate first, or adjust thresholds?
-            """
-        )
+        # st.markdown("### Group Task")
+        # st.info(
+        #     """
+        #     Based on these monitoring outputs, discuss:
+        #     - Does this look stable, like feature drift, or like concept drift?
+        #     - What evidence supports your conclusion?
+        #     - Would you investigate the data, the model, or both?
+        #     """
+        # )
 
 
     else:
