@@ -146,20 +146,73 @@ def fit_model(df: pd.DataFrame, max_depth: int):
     clf = pipeline.named_steps["model"]
     return pipeline, clf, transformed_X, y, feature_names
 
-def clear_trained_model():
-    keys_to_clear = [
-        "trained_pipeline",
-        "trained_model",
-        "feature_names",
-        "X_train_transformed",
-        "y_train",
-        "dataset_name",
-        "viz_html",
-        "model_trained",
-    ]
-    for key in keys_to_clear:
-        if key in st.session_state:
-            del st.session_state[key]
+
+def ensure_trained_models_store():
+    if "trained_models" not in st.session_state:
+        st.session_state["trained_models"] = {}
+
+
+def save_trained_model_bundle(
+    dataset_name: str,
+    dataset_label: str,
+    pipeline,
+    clf,
+    X_train_transformed,
+    y_train,
+    feature_names,
+    viz_html,
+    test_predictions,
+    model_test_acc,
+):
+    ensure_trained_models_store()
+    st.session_state["trained_models"][dataset_name] = {
+        "dataset_name": dataset_name,
+        "dataset_label": dataset_label,
+        "pipeline": pipeline,
+        "clf": clf,
+        "X_train_transformed": X_train_transformed,
+        "y_train": y_train,
+        "feature_names": feature_names,
+        "viz_html": viz_html,
+        "test_predictions": test_predictions,
+        "model_test_acc": model_test_acc,
+    }
+
+
+def get_trained_model_bundle(dataset_name: str):
+    ensure_trained_models_store()
+    return st.session_state["trained_models"].get(dataset_name)
+
+
+def has_trained_model(dataset_name: str) -> bool:
+    ensure_trained_models_store()
+    return dataset_name in st.session_state["trained_models"]
+
+
+def clear_trained_model(dataset_name: str | None = None):
+    ensure_trained_models_store()
+    if dataset_name is None:
+        st.session_state["trained_models"] = {}
+    else:
+        st.session_state["trained_models"].pop(dataset_name, None)
+
+def clear_all_trained_models():
+    st.session_state["trained_models"] = {}
+
+# def clear_trained_model():
+#     keys_to_clear = [
+#         "trained_pipeline",
+#         "trained_model",
+#         "feature_names",
+#         "X_train_transformed",
+#         "y_train",
+#         "dataset_name",
+#         "viz_html",
+#         "model_trained",
+#     ]
+#     for key in keys_to_clear:
+#         if key in st.session_state:
+#             del st.session_state[key]
 
 def inject_supertree_class_colors(html_content: str) -> str:
     """
@@ -1137,36 +1190,53 @@ def main():
         
 
         st.sidebar.subheader("Train Model")
-        if st.sidebar.button("Train and Visualise Model", help="Train a decision tree using the selected dataset to see how data readiness/quality affects model performance"):
+        
+        if st.sidebar.button(
+            "Train and Visualise Model",
+            help="Train a decision tree using the selected dataset to see how data readiness/quality affects model performance",
+        ):
             pipeline, clf, X_train_transformed, y_train, feature_names = fit_model(selected_df, max_depth)
-            st.session_state["trained_pipeline"] = pipeline
-            st.session_state["trained_model"] = clf
-            st.session_state["feature_names"] = feature_names
-            st.session_state["X_train_transformed"] = X_train_transformed
-            st.session_state["y_train"] = y_train
-            st.session_state["dataset_name"] = dataset_name
-            st.session_state["dataset_label"] = dataset_label
-            st.session_state["viz_html"] = generate_vis(clf, X_train_transformed, y_train, feature_names, CLASS_NAMES)
-            st.session_state["model_trained"] = True
-            st.session_state["test_preds"]  = pipeline.predict(test_df[FEATURE_COLUMNS])
-            st.session_state["model_test_acc"] = accuracy_score(test_df[TARGET_COLUMN],st.session_state["test_preds"])
-            #st.balloons()
-            st.toast(f"**Model Trained With** {st.session_state["dataset_label"]}.\n **Test Accuracy:** {st.session_state["model_test_acc"]:.3f}", icon="🤖")
+            viz_html = generate_vis(clf, X_train_transformed, y_train, feature_names, CLASS_NAMES)
+            test_predictions = pipeline.predict(test_df[FEATURE_COLUMNS])
+            model_test_acc = accuracy_score(test_df[TARGET_COLUMN], test_predictions)
 
-        if st.session_state["model_trained"]:
+            save_trained_model_bundle(
+                dataset_name=dataset_name,
+                dataset_label=dataset_label,
+                pipeline=pipeline,
+                clf=clf,
+                X_train_transformed=X_train_transformed,
+                y_train=y_train,
+                feature_names=feature_names,
+                viz_html=viz_html,
+                test_predictions=test_predictions,
+                model_test_acc=model_test_acc,
+            )
+
+            st.toast(
+                f"**Model Trained With** {dataset_label}.\n **Test Accuracy:** {model_test_acc:.3f}",
+                icon="🤖",
+            )
+
+        model_bundle = get_trained_model_bundle(dataset_name)
+
+        if model_bundle is not None:
             if st.sidebar.button("Reset to Data Exploration"):
-                clear_trained_model()
+                clear_trained_model(dataset_name)
                 st.rerun()
 
-        if not st.session_state.get("model_trained", False) or st.session_state.get("dataset_name") != dataset_name:
+        if model_bundle is None:
             show_data_visualisation(selected_df)
-            st.sidebar.info("Train your chosen model to see a visualisation of the decision tree.")
+            st.sidebar.info(f"{dataset_label} has not been used to train a model yet.")
             return
-        
 
-        st.subheader(f"Trained Decision Tree on {dataset_label}")#st.subheader(f"Trained {max_depth}-Level Decision Tree")
-        st.markdown(f"**Test Accuracy = {st.session_state["model_test_acc"]:.3f}**")
-        st.components.v1.html(st.session_state["viz_html"], height=600)
+        st.subheader(f"Trained Decision Tree on {dataset_label}")
+        st.markdown(f"**Test Accuracy = {model_bundle['model_test_acc']:.3f}**")
+        st.components.v1.html(model_bundle["viz_html"], height=600)
+
+        if has_trained_model(dataset_name):
+            st.sidebar.success(f"{dataset_label} already has a trained model in session.")
+            
 
 
         
@@ -1285,16 +1355,16 @@ def main():
         
         st.plotly_chart(fig, use_container_width=True)
 
+        
+
     elif current_page ==  "Model Evaluation":
         st.header("Model Evaluation")
-        if (
-            not st.session_state.get("model_trained", False)
-            or st.session_state.get("dataset_name") != dataset_name
-        ):
+        model_bundle = get_trained_model_bundle(dataset_name)
+        if model_bundle is None:
             st.info("Train your chosen model on the Model Explorer page first, then come back here to examine the its metrics when evaluated on a balanced test set.")
             return
         else:
-            test_predictions = st.session_state["trained_pipeline"].predict(test_df[FEATURE_COLUMNS])
+            test_predictions = model_bundle["pipeline"].predict(test_df[FEATURE_COLUMNS])
             test_metrics = compute_metrics(test_df[TARGET_COLUMN].astype(int), test_predictions)
             display_metrics(test_metrics, "Metrics")
 
@@ -1380,10 +1450,8 @@ def main():
     else:
         st.header("Prediction Explorer")
         st.markdown("Use a trained model to score a new transaction and inspect its decision path.")
-        if (
-            not st.session_state.get("model_trained", False)
-            or st.session_state.get("dataset_name") != dataset_name
-        ):
+        model_bundle = get_trained_model_bundle(dataset_name)
+        if model_bundle is None:    
             st.info("Train your choen model on the Model Explorer page first, then come back here to make a prediction.")
             return
 
@@ -1394,8 +1462,8 @@ def main():
         transaction_input, submitted = make_prediction_input(default_row)
 
         if submitted:
-            pipeline = st.session_state["trained_pipeline"]
-            clf = st.session_state["trained_model"]
+            pipeline = model_bundle["pipeline"]
+            clf = model_bundle["clf"]
             transformed_sample = pipeline.named_steps["preprocessor"].transform(transaction_input)
             prediction = int(pipeline.predict(transaction_input)[0])
             probabilities = pipeline.predict_proba(transaction_input)[0]
@@ -1424,7 +1492,7 @@ def main():
             highlighted_dot = highlight_dot(
                 clf,
                 np.asarray(transformed_sample),
-                st.session_state["feature_names"],
+                model_bundle["feature_names"],
                 CLASS_NAMES,
             )
 
@@ -1440,6 +1508,6 @@ def main():
 if __name__ == "__main__":
 
 
-    if "model_trained" not in st.session_state:
-        st.session_state["model_trained"] = False
+    if "trained_models" not in st.session_state:
+        st.session_state["trained_models"] = {}
     main()
