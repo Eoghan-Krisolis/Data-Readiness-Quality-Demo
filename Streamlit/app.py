@@ -71,6 +71,17 @@ DATASET_LABELS = {
     "Dataset 3": "Dataset C - Good Quality",
 }
 
+DEFAULT_TRANSACTION = {
+    "amount": 120.0,
+    "hour_of_day": 12,
+    "merchant_risk": "Medium",
+    "device_trusted": "Yes",
+    "international": "No",
+    "card_present": "Yes",
+    "transactions_last_24h": 2,
+    "account_age_days": 365,
+}
+
 @st.cache_data
 def load_csv_from_known_locations(filename: str) -> pd.DataFrame:
     """Load a CSV from one of the known local deployment paths."""
@@ -528,13 +539,13 @@ def show_feature_distributions(df: pd.DataFrame) -> None:
                 selected_features = st.multiselect(
                     "Choose numeric features to display",
                     NUMERIC_COLUMNS,
-                    default=NUMERIC_COLUMNS[:2],
+                    default=NUMERIC_COLUMNS[:],
                 )
             elif feature_type=="Categorical Features":
                 selected_features = st.multiselect(
                     "Choose categorical features to display",
                     CATEGORICAL_COLUMNS,
-                    default=CATEGORICAL_COLUMNS[:2],
+                    default=CATEGORICAL_COLUMNS[:],
                 )
 
             
@@ -851,11 +862,16 @@ def compare_all_datasets(max_depth: int, test_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def make_prediction_input(defaults: pd.Series) -> tuple[pd.DataFrame, bool]:
-    """Render prediction inputs in the main page and return the values plus submit state."""
-    merchant_risk_options = sorted(
-        defaults.get("merchant_risk_options", ["High", "Low", "Medium"])
-    )
+def make_prediction_input() -> tuple[pd.DataFrame, bool]:
+    """Render persistent prediction inputs and return the values plus submit state."""
+    if "prediction_inputs" not in st.session_state:
+        st.session_state["prediction_inputs"] = DEFAULT_TRANSACTION.copy()
+
+    current_values = st.session_state["prediction_inputs"]
+
+    merchant_risk_options = ["Low", "Medium", "High"]
+    yes_no_options = ["Yes", "No"]
+    no_yes_options = ["No", "Yes"]
 
     st.subheader("Enter Transaction Details")
     st.markdown("Adjust the transaction features below, then click **Make Prediction**.")
@@ -869,14 +885,14 @@ def make_prediction_input(defaults: pd.Series) -> tuple[pd.DataFrame, bool]:
                 amount = st.number_input(
                     "Transaction Amount",
                     min_value=0.0,
-                    value=float(defaults.get("amount", 120.0)),
+                    value=float(current_values["amount"]),
                     step=1.0,
                 )
                 hour_of_day = st.number_input(
                     "Hour of Day",
                     min_value=0,
                     max_value=23,
-                    value=int(defaults.get("hour_of_day", 12)),
+                    value=int(current_values["hour_of_day"]),
                     step=1,
                 )
 
@@ -886,12 +902,12 @@ def make_prediction_input(defaults: pd.Series) -> tuple[pd.DataFrame, bool]:
                 merchant_risk = st.selectbox(
                     "Merchant Risk",
                     options=merchant_risk_options,
-                    index=merchant_risk_options.index("Medium") if "Medium" in merchant_risk_options else 0,
+                    index=merchant_risk_options.index(current_values["merchant_risk"]),
                 )
                 card_present = st.selectbox(
                     "Card Present?",
-                    options=["Yes", "No"],
-                    index=0,
+                    options=yes_no_options,
+                    index=yes_no_options.index(current_values["card_present"]),
                 )
 
         with customer_col:
@@ -899,13 +915,13 @@ def make_prediction_input(defaults: pd.Series) -> tuple[pd.DataFrame, bool]:
                 st.markdown("**Customer Context**")
                 device_trusted = st.selectbox(
                     "Trusted Device?",
-                    options=["Yes", "No"],
-                    index=0,
+                    options=yes_no_options,
+                    index=yes_no_options.index(current_values["device_trusted"]),
                 )
                 account_age_days = st.number_input(
                     "Account Age (days)",
                     min_value=0,
-                    value=int(defaults.get("account_age_days", 365)),
+                    value=int(current_values["account_age_days"]),
                     step=1,
                 )
 
@@ -914,13 +930,13 @@ def make_prediction_input(defaults: pd.Series) -> tuple[pd.DataFrame, bool]:
                 st.markdown("**Activity Details**")
                 international = st.selectbox(
                     "International Transaction?",
-                    options=["No", "Yes"],
-                    index=0,
+                    options=no_yes_options,
+                    index=no_yes_options.index(current_values["international"]),
                 )
                 transactions_last_24h = st.number_input(
                     "Transactions in Last 24 Hours",
                     min_value=0,
-                    value=int(defaults.get("transactions_last_24h", 2)),
+                    value=int(current_values["transactions_last_24h"]),
                     step=1,
                 )
 
@@ -941,6 +957,8 @@ def make_prediction_input(defaults: pd.Series) -> tuple[pd.DataFrame, bool]:
             "account_age_days": account_age_days,
         }
     ])
+
+    st.session_state["prediction_inputs"] = input_df.iloc[0].to_dict()
 
     return input_df, submitted
 
@@ -1228,6 +1246,7 @@ def main() -> None:
         dataset_name = DATASET_LABELS[dataset_label]
         
         st.session_state["dataset_name"] = dataset_name
+
 
     # st.sidebar.subheader("Set maximum tree depth")
     max_depth = 3
@@ -1518,11 +1537,7 @@ def main() -> None:
             st.info("Train your chosen model on the Data/Model Explorer page first, then come back here to make a prediction.")
             return
 
-        current_defaults = selected_df[FEATURE_COLUMNS].copy()
-        merchant_risk_values = sorted(current_defaults["merchant_risk"].dropna().astype(str).unique().tolist())
-        default_row = current_defaults.iloc[0].copy()
-        default_row["merchant_risk_options"] = merchant_risk_values or ["High", "Low", "Medium"]
-        transaction_input, submitted = make_prediction_input(default_row)
+        transaction_input, submitted = make_prediction_input()
 
         if submitted:
             pipeline = model_bundle["pipeline"]
